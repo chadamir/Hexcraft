@@ -139,6 +139,10 @@ function renderOverlay(extra = '') {
   if (S.hover && S.tool !== 'select' && S.tool !== 'pan') {
     const [c, r] = S.hover; if (inGrid(c, r)) { const [x, y] = center(c, r); s += `<path d="${hexPathAt(x, y)}" fill="#ffffff" fill-opacity=".12" stroke="#ffffff" stroke-opacity=".7" ${sw} pointer-events="none"/>`; }
   }
+  if (S.sel && S.sel.kind === 'hexes') {
+    let d = ''; S.sel.keys.forEach((k) => { const [c, r] = unkey(k); const [x, y] = center(c, r); d += hexPathAt(x, y); });
+    s += `<path d="${d}" fill="#f0a830" fill-opacity=".10" stroke="#f0a830" stroke-width="${n2(3 / z)}" pointer-events="none"/>`;
+  }
   if (S.sel && S.sel.kind === 'hex') {
     const [c, r] = unkey(S.sel.k); const [x, y] = center(c, r);
     s += `<path d="${hexPathAt(x, y)}" fill="none" stroke="#f0a830" stroke-width="${n2(3.5 / z)}" pointer-events="none"/>`;
@@ -217,7 +221,7 @@ const TOOL_DEFS = [
   ['types', 'Y', 'Hex types (presets)', '<path d="M6 3l4 2.3v4.6L6 12.2 2 9.9V5.3zM14 3l4 2.3v4.6l-4 2.3-4-2.3V5.3zM10 10l4 2.3v4.6L10 19.2 6 16.9v-4.6z" fill="currentColor" opacity=".9"/>'],
 ];
 const TOOL_HINTS = {
-  select: 'Click a hex or object to edit it on the right. Drag objects and hex items to move them. Click a stock market cell to edit it.',
+  select: 'Click a hex or object to edit it on the right. Shift-click or drag a box to select several hexes. Ctrl C / Ctrl X / Ctrl V copy, cut and paste hexes or objects. Drag objects and hex items to move them.',
   paint: 'Drag to paint hexes with the current color or hex type. Alt-click samples a hex. Painting a removed hex restores it.',
   fill: 'Click to fill all connected hexes that look the same.',
   erase: 'Drag across hexes. Choose what to erase below.',
@@ -318,6 +322,13 @@ stage.addEventListener('pointermove', (e) => {
     case 'bg': { const b = P.bgImage; b.x = D.ox + wx - D.sx; b.y = D.oy + wy - D.sy; renderBgImage(); renderOverlay(); return; }
     case 'bgresize': { const b = P.bgImage; const w = Math.max(10, wx - b.x); b.h = w * (D.h0 / D.w0); b.w = w; renderBgImage(); renderOverlay(); return; }
     case 'track': return trackMove(e, wx, wy);
+    case 'box': {
+      D.ex = wx; D.ey = wy;
+      if (!D.moved && Math.hypot(wx - D.sx, wy - D.sy) * S.view.z < 6) return;
+      D.moved = true; const z = S.view.z;
+      renderOverlay(`<rect x="${n2(Math.min(D.sx, wx))}" y="${n2(Math.min(D.sy, wy))}" width="${n2(Math.abs(wx - D.sx))}" height="${n2(Math.abs(wy - D.sy))}" fill="#f0a830" fill-opacity=".08" stroke="#f0a830" stroke-width="${n2(1.5 / z)}" stroke-dasharray="${n2(5 / z)} ${n2(3 / z)}" pointer-events="none"/>`);
+      return;
+    }
     case 'shape': return shapeMove(wx, wy);
     case 'vtx': {
       const o = P.objects.find((x) => x.id === D.id); if (!o) return;
@@ -339,6 +350,7 @@ stage.addEventListener('pointerup', (e) => {
     case 'resize': schedulePaper(); renderProps(); break;
     case 'bg': case 'bgresize': schedulePaper(); renderProps(); break;
     case 'track': trackUp(e, wx, wy, d); break;
+    case 'box': boxUp(d); renderOverlay(); break;
     case 'shape': if (d.grew || d.baseDirty) { renderBase(); } renderOverlay(); schedulePaper(); break;
     case 'vtx': schedulePaper(); break;
   }
@@ -418,7 +430,7 @@ function selectDown(e, tgt, wx, wy, c, r) {
     D = { type: 'vtx', id: o.id, i: i + 1, moved: true }; return;
   }
   if (tgt.closest('[data-bghandle]')) { checkpoint(); D = { type: 'bgresize', w0: P.bgImage.w, h0: P.bgImage.h }; return; }
-  const itEl = tgt.closest('[data-i]');
+  const itEl = !e.shiftKey && tgt.closest('[data-i]');
   if (itEl) {
     const k = itEl.dataset.k, i = +itEl.dataset.i; const it = P.hexes[k].items[i];
     checkpoint(); D = { type: 'item', k, i, sx: wx, sy: wy, ox: it.x || 0, oy: it.y || 0 };
@@ -433,12 +445,22 @@ function selectDown(e, tgt, wx, wy, c, r) {
     return;
   }
   if (S.bgAdjust && P.bgImage) { const b = P.bgImage; if (wx >= b.x && wy >= b.y && wx <= b.x + b.w && wy <= b.y + b.h) { checkpoint(); D = { type: 'bg', sx: wx, sy: wy, ox: b.x, oy: b.y }; return; } }
-  if (inGrid(c, r)) select({ kind: 'hex', k: key(c, r) }); else select(null);
+  // hex click, shift-click toggle, or drag a box to select several hexes
+  D = { type: 'box', sx: wx, sy: wy, ex: wx, ey: wy, shift: e.shiftKey, k: inGrid(c, r) ? key(c, r) : null, moved: false };
+}
+function boxUp(d) {
+  if (d.moved) {
+    const ks = hexesInRect(d.sx, d.sy, d.ex, d.ey).filter((k) => !P.voids[k]);
+    selectKeys(d.shift ? [...selKeys(), ...ks] : ks); return;
+  }
+  if (!d.k) { if (!d.shift) select(null); return; }
+  if (d.shift) { const cur = selKeys(); const i = cur.indexOf(d.k); if (i >= 0) cur.splice(i, 1); else cur.push(d.k); selectKeys(cur); return; }
+  select({ kind: 'hex', k: d.k });
 }
 function select(sel) {
   const same = JSON.stringify(sel) === JSON.stringify(S.sel);
   S.sel = sel; renderOverlay(); if (!same) renderProps();
-  $('#stSel').textContent = sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
+  $('#stSel').textContent = sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'hexes' ? sel.keys.length + ' hexes selected' : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
 }
 
 // ----- stamp tool
@@ -701,6 +723,12 @@ window.addEventListener('keyup', (e) => { if (e.key === ' ') { S.space = false; 
 
 function deleteSel() {
   if (!S.sel) return;
+  if (S.sel.kind === 'hexes') {
+    const ks = S.sel.keys; checkpoint();
+    if (ks.some((k) => !hexIsEmpty(P.hexes[k]))) { ks.forEach((k) => { delete P.hexes[k]; renderHex(k); }); toast('Hexes cleared — press Delete again to remove them from the map'); renderProps(); }
+    else { ks.forEach((k) => { P.voids[k] = 1; delete P.hexes[k]; renderHex(k); }); renderBase(); select(null); toast(`Removed ${ks.length} hexes (Ctrl Z to undo)`); }
+    renderOverlay(); schedulePaper(); return;
+  }
   if (S.sel.kind === 'obj') { checkpoint(); P.objects = P.objects.filter((o) => o.id !== S.sel.id); renderObject(S.sel.id); select(null); schedulePaper(); return; }
   if (S.sel.kind === 'hex') {
     const k = S.sel.k, h = P.hexes[k];

@@ -33,6 +33,9 @@ const HELP = [
     <table class="kt">
       <tr><td><kbd>Del</kbd></td><td>Delete the selected object or hex item. On a hex: first clears it, then removes it from the map. On a removed hex: restores it.</td></tr>
       <tr><td><kbd>Ctrl Z</kbd> / <kbd>Ctrl Shift Z</kbd></td><td>Undo / redo</td></tr>
+      <tr><td><kbd>Ctrl C</kbd> / <kbd>Ctrl X</kbd></td><td>Copy / cut the selected hexes or object</td></tr>
+      <tr><td><kbd>Ctrl V</kbd></td><td>Paste onto the hex under the pointer (the group keeps its shape). Works between maps too.</td></tr>
+      <tr><td><kbd>Shift</kbd>-click, drag</td><td>With Select: add or remove hexes from the selection, or drag a box across empty hexes to select an area</td></tr>
       <tr><td><kbd>Ctrl D</kbd></td><td>Duplicate the selected object — or, in the Companies tab, the selected company</td></tr>
       <tr><td>Arrow keys</td><td>Nudge the selected object (<kbd>Shift</kbd> = 10 px)</td></tr>
       <tr><td><kbd>Ctrl S</kbd> / <kbd>Ctrl O</kbd></td><td>Save / open saved maps</td></tr>
@@ -51,6 +54,9 @@ const HELP = [
       <li><b>Detach:</b> copies the type's contents into the hex so you can change them individually.</li>
     </ul>
     <h4>Items inside a hex</h4>
+    <h4>Copy &amp; paste</h4>
+    <p>Select one hex, Shift-click more, or drag a box across empty hexes with the Select tool. <kbd>Ctrl C</kbd> copies everything on them — color, hex type, icons, cities, labels, costs, track, hexsides and outlines. Point at a hex and press <kbd>Ctrl V</kbd>: the group lands with its top-left hex under the pointer, keeping its shape. <kbd>Ctrl X</kbd> cuts. You can paste into another map too (same hex orientation); hex types and uploaded images come along. Company home markers stay with the original city.</p>
+    <p>With several hexes selected, the right panel can also apply the current brush, clear them, remove them, or turn them into hex types.</p>
     <h4>Outlines &amp; merged hexes</h4>
     <p>Give any hex its own <b>Outline</b> color and width in the hex panel. To make several hexes read as one big city or area, use the <b>Hexsides</b> tool <kbd>X</kbd> with the style <i>Hide grid line (merge hexes)</i> and click or drag across the edges between them. A <b>Region</b> <kbd>R</kbd> with a fill can also cover a group of hexes.</p>
     <h4>Rows &amp; columns</h4>
@@ -235,6 +241,7 @@ const ACT_TIPS = {
   typeFromHex: 'Create a reusable hex type from this hex’s color and contents.', editType: 'Edit this hex type — changes apply to every hex using it.',
   insLine: 'Insert blank rows or columns here; everything beyond moves over.', delLine: 'Delete this row or column and close the gap.', trDel: 'Delete this track segment.', trClear: 'Delete all track in this hex.', hexImgUp: 'Upload an image and use it to fill this hex.',
   backMap: 'Finish editing the type.', paintType: 'Switch to the Paint tool using this type.', dupType: 'Make a copy of this type.', delType: 'Delete this type.',
+  mCopy: 'Copy these hexes (Ctrl C). Point at a hex and press Ctrl V to paste.', mCut: 'Copy these hexes and clear them (Ctrl X).', mBrush: 'Paint all selected hexes with the current color or hex type.', mType: 'Create hex types from the different looks among these hexes.', mClear: 'Remove everything from these hexes but keep them on the map.', mVoid: 'Take these hexes off the map (Ctrl Z undoes).',
   coDup: 'Make a copy with the same stats and a new color.', coUp: 'Move this company up the list.', coDown: 'Move this company down the list.', coDel: 'Delete this company (its home marker leaves the map).',
   coPick: 'Go to the map and click a city to make it this company’s home.', coStyle: 'Use this logo style for the company’s tokens and cards.', coUpload: 'Upload a picture to use as this company’s logo.',
   detachRev: 'Turn this revenue bar into a free object you can place anywhere on the page.', trGeo: 'Switch this segment between curvilinear (arc) and Lawsonian (through the center).',
