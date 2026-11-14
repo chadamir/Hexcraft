@@ -112,7 +112,8 @@ function mapPanel() {
       ${F('Hex opacity', I.range('hexOpacity', st.hexOpacity ?? 1, 0, 1, 0.05))}
       ${F('Grid lines', I.color('gridColor', st.gridColor))}
       ${F('Line width', I.range('gridWidth', st.gridWidth, 0, 8, 0.1))}
-      ${F('Page margin', I.range('pad', st.pad ?? 40, 0, 300, 5))}</div>`);
+      ${F('Page margin', I.range('pad', st.pad ?? 40, 0, 300, 5))}</div>
+      <button class="btn sm" data-act="sidesClearAll" style="margin-top:6px">Clear all hexsides…</button>`);
   const b = P.bgImage;
   h += sec('Background image', b && P.assets[b.ref] ? `<div ${bind('bgimg', () => P.bgImage, () => { renderBgImage(); renderOverlay(); schedulePaper(); })}>
       <img src="${assetHref(b.ref)}" style="width:100%;max-height:120px;object-fit:contain;border-radius:6px;background:#0003;margin-bottom:6px">
@@ -294,6 +295,9 @@ function hexPanel(k) {
       ${t.a[0] === 'e' && t.b[0] === 'e' ? `<button class="btn sm" data-act="trGeo" data-i="${i}" title="Switch between curved and Lawsonian (through the center)">${(t.geo || P.style.trackGeo || 'curve') === 'lawson' ? 'Lawson' : 'Curve'}</button>` : ''}
       <input type="color" value="${t.color || '#111111'}" data-act-trc="${i}" style="width:26px;height:22px"><button class="btn icon sm danger" data-act="trDel" data-i="${i}">✕</button></div>`).join('') + `<button class="btn sm" data-act="trClear" style="margin-top:4px">Clear track</button>`
     : '<div class="empty">No track. Use the Track tool <kbd>K</kbd> and drag across hexes.</div>'));
+  const nSides = hexsideCount([k]);
+  out += sec('Hexsides', `${nSides ? `<div class="help" style="margin-top:0">${nSides} side${nSides === 1 ? ' has a' : 's have a'} style (river, border, hidden line…).</div>` : '<div class="help" style="margin-top:0">All six sides are plain.</div>'}
+    <button class="btn sm" data-act="sidesReset" ${nSides ? '' : 'disabled'}>Reset hexsides to plain</button>`);
   out += linesSection(k);
   out += sec('Actions', `<div class="btngrid"><button class="btn sm" data-act="typeFromHex">Save as hex type</button><button class="btn sm" data-act="clearHex">Clear hex</button>
     ${ty || (h && h.fill) ? `<button class="btn sm" data-act="detachType">${ty ? 'Detach from type' : 'Remove color'}</button>` : ''}</div>
@@ -310,6 +314,8 @@ function nameItemFor(k) {
   if (!it) { it = { t: 'text', nm: true, text: '', style: 'plain', size: 0.24, x: 0, y: isPointy() ? 0.6 : 0.56 }; h.items.push(it); }
   return it;
 }
+handlers.sidesReset = () => resetHexsides(selKeys());
+handlers.sidesClearAll = () => clearAllHexsidesConfirm();
 handlers.restoreHex = () => { checkpoint(); delete P.voids[S.sel.k]; renderBase(); renderHex(S.sel.k); renderOverlay(); renderProps(); schedulePaper(); };
 handlers.voidHex = () => { checkpoint(); const k = S.sel.k; P.voids[k] = 1; delete P.hexes[k]; renderBase(); renderHex(k); renderOverlay(); renderProps(); schedulePaper(); toast('Hex removed (Ctrl Z to undo)'); };
 handlers.clearHex = () => { checkpoint(); const k = S.sel.k; delete P.hexes[k]; renderHex(k); renderOverlay(); renderProps(); schedulePaper(); };

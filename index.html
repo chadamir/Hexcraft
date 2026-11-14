@@ -1328,6 +1328,7 @@ function hexContentStr(c, r, h, o = {}) {
 
 // ---------------- Edges (hexsides) ----------------
 const EDGE_STYLES = {
+  plain: { label: 'Plain (remove style)', color: '#888888', w: 0.1 },
   river: { label: 'River', color: '#2f7fc1', w: 0.09 },
   water: { label: 'Coast / water', color: '#2f7fc1', w: 0.16 },
   impassable: { label: 'Impassable', color: '#c62828', w: 0.15 },
@@ -1337,7 +1338,7 @@ const EDGE_STYLES = {
   dotted: { label: 'Dotted border', color: '#d4a017', w: 0.1 },
 };
 function edgeStr(k, e) {
-  if (e.t === 'hide') return '';
+  if (e.t === 'hide' || e.t === 'plain') return '';
   const { c, r, i } = edgeFromKey(k);
   const [cx, cy] = center(c, r); const cs = corners(cx, cy);
   const a = cs[i], b = cs[(i + 1) % 6], s = R();
@@ -2031,7 +2032,7 @@ stage.addEventListener('pointerup', (e) => {
   const d = D; D = null; $('#main').classList.remove('panning');
   const [wx, wy] = toWorld(e);
   switch (d.type) {
-    case 'paint': case 'erase': if (d.baseDirty) renderBase(); renderOverlay(); schedulePaper(); renderProps(); break;
+    case 'paint': case 'erase': if (d.baseDirty || d.edgesDirty) renderBase(); if (d.edgesDirty) renderEdges(); renderOverlay(); schedulePaper(); renderProps(); break;
     case 'item': if (d.moved) { schedulePaper(); renderProps(); } break;
     case 'obj': if (d.moved) { schedulePaper(); renderProps(); } break;
     case 'resize': schedulePaper(); renderProps(); break;
@@ -2071,6 +2072,7 @@ function eraseAt(wx, wy) {
     case 'fill': if (h) { delete h.fill; delete h.type; delete h.img; cleanHex(k); } break;
     case 'items': if (h) { h.items = []; h.track = []; cleanHex(k); } break;
     case 'track': if (h) { h.track = []; cleanHex(k); } break;
+    case 'sides': { const n = clearHexsides([k]); if (n) { D.edgesDirty = true; } break; }
     case 'void': if (!P.voids[k]) { P.voids[k] = 1; delete P.hexes[k]; D.baseDirty = true; } break;
     case 'restore': if (P.voids[k]) { delete P.voids[k]; D.baseDirty = true; } break;
   }
@@ -2300,7 +2302,7 @@ function hexsideDown(e, wx, wy, c, r) {
   const cur = P.edges[ek];
   let mode = 'set';
   D = { type: 'hexside', hadHide: !!(cur && cur.t === 'hide') };
-  if (e.shiftKey) mode = 'del'; else if (cur && cur.t === S.edgeOpts.t && (cur.label || '') === (S.edgeOpts.label || '')) mode = 'del';
+  if (e.shiftKey || S.edgeOpts.t === 'plain') mode = 'del'; else if (cur && cur.t === S.edgeOpts.t && (cur.label || '') === (S.edgeOpts.label || '')) mode = 'del';
   D = { type: 'hexside', mode, lastE: null, hadHide: D.hadHide };
   applyEdge(ek, mode);
 }
@@ -2378,6 +2380,23 @@ function finishRegion() {
   const o = { id: uid('o'), t: 'region', x: x0, y: y0, pts: d.pts.map((p) => [Math.round((p[0] - x0) * 100) / 100, Math.round((p[1] - y0) * 100) / 100]), ...clone(S.regionOpts) };
   P.objects.push(o); renderObjects(); select({ kind: 'obj', id: o.id }); schedulePaper();
   toast('Region added. Drag its points to adjust — click a small dot on an edge to add a point, Shift-click a point to remove it.');
+}
+
+// ----- reset hexsides to plain
+function clearHexsides(keys) {
+  let n = 0;
+  keys.forEach((k) => { const [c, r] = unkey(k); for (let i = 0; i < 6; i++) { const ek = edgeKey(c, r, i); if (P.edges[ek]) { delete P.edges[ek]; n++; } } });
+  return n;
+}
+function hexsideCount(keys) { const seen = new Set(); keys.forEach((k) => { const [c, r] = unkey(k); for (let i = 0; i < 6; i++) { const ek = edgeKey(c, r, i); if (P.edges[ek]) seen.add(ek); } }); return seen.size; }
+function resetHexsides(keys) {
+  if (!hexsideCount(keys)) { toast('Those hexsides are already plain.'); return; }
+  checkpoint(); const n = clearHexsides(keys); renderBase(); renderEdges(); renderProps(); schedulePaper();
+  toast(`Reset ${n} hexside${n === 1 ? '' : 's'} to plain`);
+}
+function clearAllHexsidesConfirm() {
+  const n = Object.keys(P.edges).length; if (!n) { toast('There are no styled hexsides on this map.'); return; }
+  confirmBox('Clear all hexsides', `Remove all ${n} hexside styles (rivers, borders, impassable sides, hidden grid lines) from the whole map? Ctrl Z undoes this.`, 'Clear all', () => { checkpoint(); P.edges = {}; renderBase(); renderEdges(); renderProps(); schedulePaper(); toast(`Cleared ${n} hexsides`); });
 }
 
 // ---------------- Keyboard ----------------
@@ -2528,7 +2547,7 @@ function renderToolOpts() {
       <div class="help" style="margin:0">${S.brush.kind === 'type' ? 'Painting hex type <b>' + esc((P.types.find((x) => x.id === S.brush.id) || {}).name || '') + '</b>' : 'Painting color <code>' + S.brush.color + '</code>'}. Pick a color or a hex type below.</div></div>`;
   } else if (t === 'erase') {
     h = `<h3>Erase</h3><select id="eraseMode">
-      <option value="all">Everything in the hex</option><option value="fill">Color / hex type only</option><option value="items">Icons, labels & track</option><option value="track">Track only</option>
+      <option value="all">Everything in the hex</option><option value="fill">Color / hex type only</option><option value="items">Icons, labels & track</option><option value="track">Track only</option><option value="sides">Hexsides only (back to plain)</option>
       <option value="void">Remove hex from the map</option><option value="restore">Restore removed hexes</option></select>
       <div class="help">Removing hexes lets you shape coastlines and irregular maps. Removed hexes show as dashed outlines while editing and are not exported.</div>`;
   } else if (t === 'stamp' || t === 'text') {
@@ -2555,7 +2574,9 @@ function renderToolOpts() {
       <div class="f"><label>Style</label><select id="edgeT">${Object.entries(EDGE_STYLES).map(([k, v]) => `<option value="${k}" ${o.t === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
       <div class="f"><label>Color</label><div class="row"><label class="chk" style="margin:0"><input type="checkbox" id="edgeColOn" ${o.color ? 'checked' : ''}>Custom</label><input type="color" id="edgeCol" value="${o.color || EDGE_STYLES[o.t].color}"></div></div>
       <div class="f"><label>Width</label><input type="range" id="edgeW" min="0.4" max="3" step="0.1" value="${o.w}"></div>
-      <div class="f"><label>Label</label><input type="text" id="edgeLabel" placeholder="e.g. $40 or +20" value="${esc(o.label)}"></div>`;
+      ${o.t === 'plain' ? '' : `<div class="f"><label>Label</label><input type="text" id="edgeLabel" placeholder="e.g. $40 or +20" value="${esc(o.label)}"></div>`}
+      <div class="help">${o.t === 'plain' ? 'Click or drag along edges to turn them back into normal grid lines.' : 'Click an edge to add this style; click it again (or Shift-click) to remove it. Choose <b>Plain</b> above to clear edges by dragging.'}</div>
+      <button class="btn sm" id="edgeClearAll" style="margin-top:4px">Clear all hexsides on the map…</button>`;
   } else if (t === 'shape') {
     h = `<h3>Map shape</h3><div class="help">Removed hexes are hidden from the map and exports. Dragging off the edge of the grid keeps adding hexes, so you can grow the map in any direction one hex at a time.</div>
       <label class="chk"><input type="checkbox" id="showVoids" ${S.showVoids ? 'checked' : ''}>Show removed hexes as outlines</label>
@@ -2594,6 +2615,7 @@ function renderToolOpts() {
   on('edgeCol', 'input', (e) => { S.edgeOpts.color = e.target.value; $('#edgeColOn').checked = true; });
   on('edgeW', 'input', (e) => (S.edgeOpts.w = +e.target.value));
   on('edgeLabel', 'input', (e) => (S.edgeOpts.label = e.target.value));
+  on('edgeClearAll', 'click', () => clearAllHexsidesConfirm());
   on('showVoids', 'change', (e) => { S.showVoids = e.target.checked; renderOverlay(); });
   on('rgFillOn', 'change', (e) => (S.regionOpts.fill = e.target.checked ? $('#rgFill').value : ''));
   on('rgFill', 'input', (e) => { S.regionOpts.fill = e.target.value; $('#rgFillOn').checked = true; });
@@ -2752,7 +2774,8 @@ function mapPanel() {
       ${F('Hex opacity', I.range('hexOpacity', st.hexOpacity ?? 1, 0, 1, 0.05))}
       ${F('Grid lines', I.color('gridColor', st.gridColor))}
       ${F('Line width', I.range('gridWidth', st.gridWidth, 0, 8, 0.1))}
-      ${F('Page margin', I.range('pad', st.pad ?? 40, 0, 300, 5))}</div>`);
+      ${F('Page margin', I.range('pad', st.pad ?? 40, 0, 300, 5))}</div>
+      <button class="btn sm" data-act="sidesClearAll" style="margin-top:6px">Clear all hexsides…</button>`);
   const b = P.bgImage;
   h += sec('Background image', b && P.assets[b.ref] ? `<div ${bind('bgimg', () => P.bgImage, () => { renderBgImage(); renderOverlay(); schedulePaper(); })}>
       <img src="${assetHref(b.ref)}" style="width:100%;max-height:120px;object-fit:contain;border-radius:6px;background:#0003;margin-bottom:6px">
@@ -2934,6 +2957,9 @@ function hexPanel(k) {
       ${t.a[0] === 'e' && t.b[0] === 'e' ? `<button class="btn sm" data-act="trGeo" data-i="${i}" title="Switch between curved and Lawsonian (through the center)">${(t.geo || P.style.trackGeo || 'curve') === 'lawson' ? 'Lawson' : 'Curve'}</button>` : ''}
       <input type="color" value="${t.color || '#111111'}" data-act-trc="${i}" style="width:26px;height:22px"><button class="btn icon sm danger" data-act="trDel" data-i="${i}">✕</button></div>`).join('') + `<button class="btn sm" data-act="trClear" style="margin-top:4px">Clear track</button>`
     : '<div class="empty">No track. Use the Track tool <kbd>K</kbd> and drag across hexes.</div>'));
+  const nSides = hexsideCount([k]);
+  out += sec('Hexsides', `${nSides ? `<div class="help" style="margin-top:0">${nSides} side${nSides === 1 ? ' has a' : 's have a'} style (river, border, hidden line…).</div>` : '<div class="help" style="margin-top:0">All six sides are plain.</div>'}
+    <button class="btn sm" data-act="sidesReset" ${nSides ? '' : 'disabled'}>Reset hexsides to plain</button>`);
   out += linesSection(k);
   out += sec('Actions', `<div class="btngrid"><button class="btn sm" data-act="typeFromHex">Save as hex type</button><button class="btn sm" data-act="clearHex">Clear hex</button>
     ${ty || (h && h.fill) ? `<button class="btn sm" data-act="detachType">${ty ? 'Detach from type' : 'Remove color'}</button>` : ''}</div>
@@ -2950,6 +2976,8 @@ function nameItemFor(k) {
   if (!it) { it = { t: 'text', nm: true, text: '', style: 'plain', size: 0.24, x: 0, y: isPointy() ? 0.6 : 0.56 }; h.items.push(it); }
   return it;
 }
+handlers.sidesReset = () => resetHexsides(selKeys());
+handlers.sidesClearAll = () => clearAllHexsidesConfirm();
 handlers.restoreHex = () => { checkpoint(); delete P.voids[S.sel.k]; renderBase(); renderHex(S.sel.k); renderOverlay(); renderProps(); schedulePaper(); };
 handlers.voidHex = () => { checkpoint(); const k = S.sel.k; P.voids[k] = 1; delete P.hexes[k]; renderBase(); renderHex(k); renderOverlay(); renderProps(); schedulePaper(); toast('Hex removed (Ctrl Z to undo)'); };
 handlers.clearHex = () => { checkpoint(); const k = S.sel.k; delete P.hexes[k]; renderHex(k); renderOverlay(); renderProps(); schedulePaper(); };
@@ -3239,7 +3267,7 @@ const HELP = [
       <tr><td><kbd>S</kbd></td><td><b>Stamp</b> — place the selected stamp (city, town, icon, cost, upload) where you click inside a hex. <kbd>Alt</kbd>-click places it freely on the page.</td></tr>
       <tr><td><kbd>T</kbd></td><td><b>Text</b> — click a hex to add a label; click off the grid (or <kbd>Alt</kbd>-click) for a free text box.</td></tr>
       <tr><td><kbd>K</kbd></td><td><b>Track</b> — drag across hexes to lay pre-printed track. <kbd>Shift</kbd>-drag removes.</td></tr>
-      <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes.</td></tr>
+      <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes. The <i>Plain</i> style turns edges back to normal.</td></tr>
       <tr><td><kbd>A</kbd></td><td><b>Add / remove hexes</b> — click or drag to remove hexes; click removed hexes or empty space beyond the grid to add.</td></tr>
       <tr><td><kbd>R</kbd></td><td><b>Region</b> — draw freeform shapes: lakes, seas, multi-hex off-board areas, merged hexes.</td></tr>
       <tr><td><kbd>H</kbd> / <kbd>Space</kbd></td><td><b>Pan</b> — drag to move around. Hold Space with any tool. Mouse wheel zooms; <kbd>Shift</kbd>+wheel scrolls sideways.</td></tr>
@@ -3303,6 +3331,7 @@ const HELP = [
       <li><b>Cut hexes at map edge:</b> in map settings › Map edge, trim each side to leave partial hexes along the board edge, with an optional edge line.</li>
       <li><b>Regions</b> <kbd>R</kbd>: freeform shapes that snap to hex corners and edge midpoints (<kbd>Alt</kbd> for free placement). Use them for lakes and seas, off-board areas spanning several hexes, merged “double” hexes, or borders that don't follow the grid. Turn on <i>Smooth curves</i> for coastlines, or <i>Behind the hex grid</i> to put a shape under the hexes.</li>
       <li><b>Hexsides</b> <kbd>X</kbd>: rivers, coasts, impassable sides, colored lines, dashed or dotted borders, each with an optional label such as <code>$40</code>. <i>Hide grid line</i> removes the line between two hexes so they merge into one shape.</li>
+      <li><b>Back to plain:</b> choose <i>Plain (remove style)</i> in the Hexsides tool and click or drag along edges; or press <i>Reset hexsides to plain</i> in a hex's panel (also for several selected hexes); or use the Erase tool's <i>Hexsides only</i> mode; or <i>Clear all hexsides…</i> in map settings.</li>
     </ul>
     <p>Grow or shrink rows and columns from any side with the buttons under <i>Grid</i> — your content stays where it is.</p>
     <p><b>Widen the map in the middle:</b> select a hex and use <i>Rows &amp; columns</i> in its panel to insert rows above/below or columns left/right (1–4 at a time), or delete that row or column. Everything beyond moves over with its contents, track, hexsides and home cities. In offset layouts, inserting an odd number of the offset lines shifts the far side half a hex sideways to keep it intact; insert two to keep it lined up.</p>`],
@@ -3456,6 +3485,7 @@ const ACT_TIPS = {
   typeFromHex: 'Create a reusable hex type from this hex’s color and contents.', editType: 'Edit this hex type — changes apply to every hex using it.',
   insLine: 'Insert blank rows or columns here; everything beyond moves over.', delLine: 'Delete this row or column and close the gap.', trDel: 'Delete this track segment.', trClear: 'Delete all track in this hex.', hexImgUp: 'Upload an image and use it to fill this hex.',
   backMap: 'Finish editing the type.', paintType: 'Switch to the Paint tool using this type.', dupType: 'Make a copy of this type.', delType: 'Delete this type.',
+  sidesReset: 'Turn every side of the selected hex(es) back into a normal grid line.', sidesClearAll: 'Remove every hexside style from the whole map.',
   mCopy: 'Copy these hexes (Ctrl C). Point at a hex and press Ctrl V to paste.', mCut: 'Copy these hexes and clear them (Ctrl X).', mBrush: 'Paint all selected hexes with the current color or hex type.', mType: 'Create hex types from the different looks among these hexes.', mClear: 'Remove everything from these hexes but keep them on the map.', mVoid: 'Take these hexes off the map (Ctrl Z undoes).',
   coDup: 'Make a copy with the same stats and a new color.', coUp: 'Move this company up the list.', coDown: 'Move this company down the list.', coDel: 'Delete this company (its home marker leaves the map).',
   coPick: 'Go to the map and click a city to make it this company’s home.', coStyle: 'Use this logo style for the company’s tokens and cards.', coUpload: 'Upload a picture to use as this company’s logo.',
@@ -4327,7 +4357,8 @@ function multiPanel(keys) {
     <div class="btngrid">
       <button class="btn sm pri" data-act="mCopy">Copy (Ctrl C)</button><button class="btn sm" data-act="mCut">Cut (Ctrl X)</button>
       <button class="btn sm" data-act="mBrush">Apply current brush</button><button class="btn sm" data-act="mType">Save as hex types</button>
-      <button class="btn sm" data-act="mClear">Clear contents</button><button class="btn sm danger" data-act="mVoid">Remove hexes</button>
+      <button class="btn sm" data-act="mClear">Clear contents</button><button class="btn sm" data-act="sidesReset">Reset hexsides</button>
+      <button class="btn sm danger" data-act="mVoid" style="grid-column:span 2">Remove hexes</button>
     </div>
     <div class="help">${filled} of ${n} have content. To paste, point at a hex and press <kbd>Ctrl V</kbd> — the group keeps its shape, with the top-left hex landing under the pointer.</div>`);
 }

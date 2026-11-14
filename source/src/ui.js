@@ -344,7 +344,7 @@ stage.addEventListener('pointerup', (e) => {
   const d = D; D = null; $('#main').classList.remove('panning');
   const [wx, wy] = toWorld(e);
   switch (d.type) {
-    case 'paint': case 'erase': if (d.baseDirty) renderBase(); renderOverlay(); schedulePaper(); renderProps(); break;
+    case 'paint': case 'erase': if (d.baseDirty || d.edgesDirty) renderBase(); if (d.edgesDirty) renderEdges(); renderOverlay(); schedulePaper(); renderProps(); break;
     case 'item': if (d.moved) { schedulePaper(); renderProps(); } break;
     case 'obj': if (d.moved) { schedulePaper(); renderProps(); } break;
     case 'resize': schedulePaper(); renderProps(); break;
@@ -384,6 +384,7 @@ function eraseAt(wx, wy) {
     case 'fill': if (h) { delete h.fill; delete h.type; delete h.img; cleanHex(k); } break;
     case 'items': if (h) { h.items = []; h.track = []; cleanHex(k); } break;
     case 'track': if (h) { h.track = []; cleanHex(k); } break;
+    case 'sides': { const n = clearHexsides([k]); if (n) { D.edgesDirty = true; } break; }
     case 'void': if (!P.voids[k]) { P.voids[k] = 1; delete P.hexes[k]; D.baseDirty = true; } break;
     case 'restore': if (P.voids[k]) { delete P.voids[k]; D.baseDirty = true; } break;
   }
@@ -613,7 +614,7 @@ function hexsideDown(e, wx, wy, c, r) {
   const cur = P.edges[ek];
   let mode = 'set';
   D = { type: 'hexside', hadHide: !!(cur && cur.t === 'hide') };
-  if (e.shiftKey) mode = 'del'; else if (cur && cur.t === S.edgeOpts.t && (cur.label || '') === (S.edgeOpts.label || '')) mode = 'del';
+  if (e.shiftKey || S.edgeOpts.t === 'plain') mode = 'del'; else if (cur && cur.t === S.edgeOpts.t && (cur.label || '') === (S.edgeOpts.label || '')) mode = 'del';
   D = { type: 'hexside', mode, lastE: null, hadHide: D.hadHide };
   applyEdge(ek, mode);
 }
@@ -691,6 +692,23 @@ function finishRegion() {
   const o = { id: uid('o'), t: 'region', x: x0, y: y0, pts: d.pts.map((p) => [Math.round((p[0] - x0) * 100) / 100, Math.round((p[1] - y0) * 100) / 100]), ...clone(S.regionOpts) };
   P.objects.push(o); renderObjects(); select({ kind: 'obj', id: o.id }); schedulePaper();
   toast('Region added. Drag its points to adjust — click a small dot on an edge to add a point, Shift-click a point to remove it.');
+}
+
+// ----- reset hexsides to plain
+function clearHexsides(keys) {
+  let n = 0;
+  keys.forEach((k) => { const [c, r] = unkey(k); for (let i = 0; i < 6; i++) { const ek = edgeKey(c, r, i); if (P.edges[ek]) { delete P.edges[ek]; n++; } } });
+  return n;
+}
+function hexsideCount(keys) { const seen = new Set(); keys.forEach((k) => { const [c, r] = unkey(k); for (let i = 0; i < 6; i++) { const ek = edgeKey(c, r, i); if (P.edges[ek]) seen.add(ek); } }); return seen.size; }
+function resetHexsides(keys) {
+  if (!hexsideCount(keys)) { toast('Those hexsides are already plain.'); return; }
+  checkpoint(); const n = clearHexsides(keys); renderBase(); renderEdges(); renderProps(); schedulePaper();
+  toast(`Reset ${n} hexside${n === 1 ? '' : 's'} to plain`);
+}
+function clearAllHexsidesConfirm() {
+  const n = Object.keys(P.edges).length; if (!n) { toast('There are no styled hexsides on this map.'); return; }
+  confirmBox('Clear all hexsides', `Remove all ${n} hexside styles (rivers, borders, impassable sides, hidden grid lines) from the whole map? Ctrl Z undoes this.`, 'Clear all', () => { checkpoint(); P.edges = {}; renderBase(); renderEdges(); renderProps(); schedulePaper(); toast(`Cleared ${n} hexsides`); });
 }
 
 // ---------------- Keyboard ----------------
@@ -841,7 +859,7 @@ function renderToolOpts() {
       <div class="help" style="margin:0">${S.brush.kind === 'type' ? 'Painting hex type <b>' + esc((P.types.find((x) => x.id === S.brush.id) || {}).name || '') + '</b>' : 'Painting color <code>' + S.brush.color + '</code>'}. Pick a color or a hex type below.</div></div>`;
   } else if (t === 'erase') {
     h = `<h3>Erase</h3><select id="eraseMode">
-      <option value="all">Everything in the hex</option><option value="fill">Color / hex type only</option><option value="items">Icons, labels & track</option><option value="track">Track only</option>
+      <option value="all">Everything in the hex</option><option value="fill">Color / hex type only</option><option value="items">Icons, labels & track</option><option value="track">Track only</option><option value="sides">Hexsides only (back to plain)</option>
       <option value="void">Remove hex from the map</option><option value="restore">Restore removed hexes</option></select>
       <div class="help">Removing hexes lets you shape coastlines and irregular maps. Removed hexes show as dashed outlines while editing and are not exported.</div>`;
   } else if (t === 'stamp' || t === 'text') {
@@ -868,7 +886,9 @@ function renderToolOpts() {
       <div class="f"><label>Style</label><select id="edgeT">${Object.entries(EDGE_STYLES).map(([k, v]) => `<option value="${k}" ${o.t === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
       <div class="f"><label>Color</label><div class="row"><label class="chk" style="margin:0"><input type="checkbox" id="edgeColOn" ${o.color ? 'checked' : ''}>Custom</label><input type="color" id="edgeCol" value="${o.color || EDGE_STYLES[o.t].color}"></div></div>
       <div class="f"><label>Width</label><input type="range" id="edgeW" min="0.4" max="3" step="0.1" value="${o.w}"></div>
-      <div class="f"><label>Label</label><input type="text" id="edgeLabel" placeholder="e.g. $40 or +20" value="${esc(o.label)}"></div>`;
+      ${o.t === 'plain' ? '' : `<div class="f"><label>Label</label><input type="text" id="edgeLabel" placeholder="e.g. $40 or +20" value="${esc(o.label)}"></div>`}
+      <div class="help">${o.t === 'plain' ? 'Click or drag along edges to turn them back into normal grid lines.' : 'Click an edge to add this style; click it again (or Shift-click) to remove it. Choose <b>Plain</b> above to clear edges by dragging.'}</div>
+      <button class="btn sm" id="edgeClearAll" style="margin-top:4px">Clear all hexsides on the map…</button>`;
   } else if (t === 'shape') {
     h = `<h3>Map shape</h3><div class="help">Removed hexes are hidden from the map and exports. Dragging off the edge of the grid keeps adding hexes, so you can grow the map in any direction one hex at a time.</div>
       <label class="chk"><input type="checkbox" id="showVoids" ${S.showVoids ? 'checked' : ''}>Show removed hexes as outlines</label>
@@ -907,6 +927,7 @@ function renderToolOpts() {
   on('edgeCol', 'input', (e) => { S.edgeOpts.color = e.target.value; $('#edgeColOn').checked = true; });
   on('edgeW', 'input', (e) => (S.edgeOpts.w = +e.target.value));
   on('edgeLabel', 'input', (e) => (S.edgeOpts.label = e.target.value));
+  on('edgeClearAll', 'click', () => clearAllHexsidesConfirm());
   on('showVoids', 'change', (e) => { S.showVoids = e.target.checked; renderOverlay(); });
   on('rgFillOn', 'change', (e) => (S.regionOpts.fill = e.target.checked ? $('#rgFill').value : ''));
   on('rgFill', 'input', (e) => { S.regionOpts.fill = e.target.value; $('#rgFillOn').checked = true; });

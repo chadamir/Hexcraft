@@ -146,7 +146,8 @@ function multiPanel(keys) {
     <div class="btngrid">
       <button class="btn sm pri" data-act="mCopy">Copy (Ctrl C)</button><button class="btn sm" data-act="mCut">Cut (Ctrl X)</button>
       <button class="btn sm" data-act="mBrush">Apply current brush</button><button class="btn sm" data-act="mType">Save as hex types</button>
-      <button class="btn sm" data-act="mClear">Clear contents</button><button class="btn sm danger" data-act="mVoid">Remove hexes</button>
+      <button class="btn sm" data-act="mClear">Clear contents</button><button class="btn sm" data-act="sidesReset">Reset hexsides</button>
+      <button class="btn sm danger" data-act="mVoid" style="grid-column:span 2">Remove hexes</button>
     </div>
     <div class="help">${filled} of ${n} have content. To paste, point at a hex and press <kbd>Ctrl V</kbd> — the group keeps its shape, with the top-left hex landing under the pointer.</div>`);
 }

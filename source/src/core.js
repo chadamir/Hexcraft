@@ -428,6 +428,7 @@ function hexContentStr(c, r, h, o = {}) {
 
 // ---------------- Edges (hexsides) ----------------
 const EDGE_STYLES = {
+  plain: { label: 'Plain (remove style)', color: '#888888', w: 0.1 },
   river: { label: 'River', color: '#2f7fc1', w: 0.09 },
   water: { label: 'Coast / water', color: '#2f7fc1', w: 0.16 },
   impassable: { label: 'Impassable', color: '#c62828', w: 0.15 },
@@ -437,7 +438,7 @@ const EDGE_STYLES = {
   dotted: { label: 'Dotted border', color: '#d4a017', w: 0.1 },
 };
 function edgeStr(k, e) {
-  if (e.t === 'hide') return '';
+  if (e.t === 'hide' || e.t === 'plain') return '';
   const { c, r, i } = edgeFromKey(k);
   const [cx, cy] = center(c, r); const cs = corners(cx, cy);
   const a = cs[i], b = cs[(i + 1) % 6], s = R();

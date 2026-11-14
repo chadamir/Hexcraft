@@ -24,7 +24,7 @@ const HELP = [
       <tr><td><kbd>S</kbd></td><td><b>Stamp</b> — place the selected stamp (city, town, icon, cost, upload) where you click inside a hex. <kbd>Alt</kbd>-click places it freely on the page.</td></tr>
       <tr><td><kbd>T</kbd></td><td><b>Text</b> — click a hex to add a label; click off the grid (or <kbd>Alt</kbd>-click) for a free text box.</td></tr>
       <tr><td><kbd>K</kbd></td><td><b>Track</b> — drag across hexes to lay pre-printed track. <kbd>Shift</kbd>-drag removes.</td></tr>
-      <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes.</td></tr>
+      <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes. The <i>Plain</i> style turns edges back to normal.</td></tr>
       <tr><td><kbd>A</kbd></td><td><b>Add / remove hexes</b> — click or drag to remove hexes; click removed hexes or empty space beyond the grid to add.</td></tr>
       <tr><td><kbd>R</kbd></td><td><b>Region</b> — draw freeform shapes: lakes, seas, multi-hex off-board areas, merged hexes.</td></tr>
       <tr><td><kbd>H</kbd> / <kbd>Space</kbd></td><td><b>Pan</b> — drag to move around. Hold Space with any tool. Mouse wheel zooms; <kbd>Shift</kbd>+wheel scrolls sideways.</td></tr>
@@ -88,6 +88,7 @@ const HELP = [
       <li><b>Cut hexes at map edge:</b> in map settings › Map edge, trim each side to leave partial hexes along the board edge, with an optional edge line.</li>
       <li><b>Regions</b> <kbd>R</kbd>: freeform shapes that snap to hex corners and edge midpoints (<kbd>Alt</kbd> for free placement). Use them for lakes and seas, off-board areas spanning several hexes, merged “double” hexes, or borders that don't follow the grid. Turn on <i>Smooth curves</i> for coastlines, or <i>Behind the hex grid</i> to put a shape under the hexes.</li>
       <li><b>Hexsides</b> <kbd>X</kbd>: rivers, coasts, impassable sides, colored lines, dashed or dotted borders, each with an optional label such as <code>$40</code>. <i>Hide grid line</i> removes the line between two hexes so they merge into one shape.</li>
+      <li><b>Back to plain:</b> choose <i>Plain (remove style)</i> in the Hexsides tool and click or drag along edges; or press <i>Reset hexsides to plain</i> in a hex's panel (also for several selected hexes); or use the Erase tool's <i>Hexsides only</i> mode; or <i>Clear all hexsides…</i> in map settings.</li>
     </ul>
     <p>Grow or shrink rows and columns from any side with the buttons under <i>Grid</i> — your content stays where it is.</p>
     <p><b>Widen the map in the middle:</b> select a hex and use <i>Rows &amp; columns</i> in its panel to insert rows above/below or columns left/right (1–4 at a time), or delete that row or column. Everything beyond moves over with its contents, track, hexsides and home cities. In offset layouts, inserting an odd number of the offset lines shifts the far side half a hex sideways to keep it intact; insert two to keep it lined up.</p>`],
@@ -241,6 +242,7 @@ const ACT_TIPS = {
   typeFromHex: 'Create a reusable hex type from this hex’s color and contents.', editType: 'Edit this hex type — changes apply to every hex using it.',
   insLine: 'Insert blank rows or columns here; everything beyond moves over.', delLine: 'Delete this row or column and close the gap.', trDel: 'Delete this track segment.', trClear: 'Delete all track in this hex.', hexImgUp: 'Upload an image and use it to fill this hex.',
   backMap: 'Finish editing the type.', paintType: 'Switch to the Paint tool using this type.', dupType: 'Make a copy of this type.', delType: 'Delete this type.',
+  sidesReset: 'Turn every side of the selected hex(es) back into a normal grid line.', sidesClearAll: 'Remove every hexside style from the whole map.',
   mCopy: 'Copy these hexes (Ctrl C). Point at a hex and press Ctrl V to paste.', mCut: 'Copy these hexes and clear them (Ctrl X).', mBrush: 'Paint all selected hexes with the current color or hex type.', mType: 'Create hex types from the different looks among these hexes.', mClear: 'Remove everything from these hexes but keep them on the map.', mVoid: 'Take these hexes off the map (Ctrl Z undoes).',
   coDup: 'Make a copy with the same stats and a new color.', coUp: 'Move this company up the list.', coDown: 'Move this company down the list.', coDel: 'Delete this company (its home marker leaves the map).',
   coPick: 'Go to the map and click a city to make it this company’s home.', coStyle: 'Use this logo style for the company’s tokens and cards.', coUpload: 'Upload a picture to use as this company’s logo.',
