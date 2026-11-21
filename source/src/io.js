@@ -564,6 +564,7 @@ document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')
 const ACTS = {
   new: newDialog, open: openDialog, save: () => doSave(), saveas: saveAsCopy,
   savefile: () => saveBlob(slug(P.name) + '.hexmap.json', fullJSON(), 'application/json'),
+  'gamedata-export': () => exportGameData(),
   openfile: openFileFlow,
   'maker-import': () => pickFiles('.json,application/json', false, async (files) => { const txt = await readText(files[0]); loadProject(txt, { cloud: false }); }),
   'maker-export': () => { try { const g = exportMaker(); saveBlob(slug(P.name) + '.18xxmaker.json', JSON.stringify(g, null, 2), 'application/json'); } catch (e) { console.error(e); toast('18xx Maker export failed: ' + e.message, true); } },

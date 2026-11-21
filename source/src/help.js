@@ -162,6 +162,23 @@ const HELP = [
       <li><b>Company components</b> print from the Companies tab — see <i>Companies, shares &amp; charters</i>.</li>
       <li>The light “page” behind the map on the canvas is the export area. Adjust its margin in map settings › Colors › Page margin.</li>
     </ul>`],
+  ['gamedata', 'Game data for programs', `
+    <p>The drawing is for people. <b>File › Export game data</b> saves what the map <i>means</i> as a <code>.game.json</code> file a program can read — for turning a map into a playable online game without copying it by hand.</p>
+    <ul>
+      <li><b>Every hex</b> on the map, with its coordinate (A1…), column and row, its centre on the page, its <b>Kind</b> (terrain), <b>Build cost</b> and <b>Tags</b>.</li>
+      <li><b>Cities and towns</b>: name, slots, revenue values, home marks, which company has its home there, tags and real place.</li>
+      <li><b>Hexsides</b> with a style (river, impassable, border…), as the two hexes they separate.</li>
+      <li><b>Regions</b> drawn with the Region tool, by name, with the hexes inside them; <b>companies</b> with their home city; free text labels.</li>
+    </ul>
+    <h4>Filling it in</h4>
+    <ul>
+      <li>Set <b>Kind</b>, <b>Build cost</b> and <b>Tags</b> on a <b>hex type</b> once (e.g. Mountain: kind <i>mountain</i>, cost <i>60</i>); every hex painted with it gets them. A hex's own Game data section overrides its type.</li>
+      <li>If you don't set a cost, a <b>Cost</b> stamp printed on the hex (like “$60”) is used.</li>
+      <li><b>Tags</b> are any words, comma separated, for whatever a game needs: <i>coal, port, start, home:PRR, border</i>.</li>
+      <li><b>Real place</b> on a city or town (latitude, longitude, e.g. <i>40.44, -79.99</i>) lets a program draw real coastlines and borders under the map.</li>
+      <li>Give each region a <b>Region name</b> (countries, provinces, companies' territories).</li>
+    </ul>
+    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind.</p>`],
 ];
 function helpDialog(sec = 'start') {
   closeMenus();
@@ -205,6 +222,12 @@ const FIELD_TIPS = {
   'Revenue': 'Revenue value shown in a small circle beside the city or town. Leave empty for none.',
   'Rev. side': 'Which side the revenue circle sits on.',
   'Home marks': 'Text inside each slot, comma separated — e.g. company home stations.',
+  'Kind': 'Terrain kind for the game data export (plain, mountain, water…). Not drawn. On a hex, overrides its type.',
+  'Build cost': 'Cost to build in this hex, as a number, for the game data export. Not drawn. Empty uses the hex type’s cost, or a printed Cost stamp.',
+  'Tags': 'Any words, comma separated (coal, port, start, home:PRR…), passed on in the game data export. Not drawn.',
+  'Real place': 'Latitude and longitude of the real place (e.g. 40.44, -79.99), for the game data export. Not drawn.',
+  'Region name': 'Name of this region in the game data export (e.g. a country or province).',
+  'Region tags': 'Any words, comma separated, passed on with this region in the game data export.',
   'Name pos.': 'Put the name above or below.', 'Name size': 'Size of the name text.',
   'Fill': 'Fill color. Untick for the default.', 'Style': 'Visual style.',
   'Text size': 'Size of the text.', 'Text color': 'Color of the text.',
@@ -256,7 +279,7 @@ const ACT_TIPS = {
   save: 'Save to your library (Ctrl S).', saveas: 'Save a duplicate under a new name.', savefile: 'Download a .hexmap.json project file you can open later.',
   openfile: 'Open a .hexmap.json project file.', 'ins-market1': 'A one-dimensional share price or revenue track.', 'ins-market2': 'A 2D stock market grid with zones and ledges.',
   'ins-table': 'A table for costs, trains, phases or a legend — supports icons.', 'ins-text': 'A free text box for titles and notes.', 'ins-revbox': 'Phase revenue boxes for an off-board area, as a free object you can place anywhere.',
-  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
+  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
 };
 const TOP_TIPS = {
   '#projName': 'Map name — click to rename.', '#undoBtn': 'Undo (Ctrl Z)', '#redoBtn': 'Redo (Ctrl Shift Z)',

@@ -13,6 +13,11 @@ const I = {
   area: (f, v, rows = 5, ph = '') => `<textarea data-f="${f}" rows="${rows}" spellcheck="false" placeholder="${esc(ph)}">${esc(v ?? '')}</textarea>`,
   seg: (f, v, opts, t = '') => `<div class="seg" data-segf="${f}"${t ? ` data-t="${t}"` : ''}>${opts.map(([val, lab]) => `<button type="button" data-v="${esc(val)}" class="${String(val) === String(v) ? 'on' : ''}">${esc(lab)}</button>`).join('')}</div>`,
 };
+// Game data fields (File › Export game data): terrain kind (free text with suggestions), build cost, tags
+const kindInput = (v, ph) => `<input type="text" data-f="kind" list="hcKinds" value="${esc(v ?? '')}" placeholder="${esc(ph || 'e.g. mountain')}"><datalist id="hcKinds">${HEX_KINDS.map((k) => `<option value="${k}">`).join('')}</datalist>`;
+const gameDataFields = (o, inherit) => F('Kind', kindInput(o.kind, inherit && inherit.kind ? inherit.kind + ' (from type)' : '')) +
+  F('Build cost', I.text('cost', o.cost, inherit && inherit.cost !== undefined && inherit.cost !== '' ? inherit.cost + ' (from type)' : 'e.g. 60')) +
+  F('Tags', I.text('tags', o.tags, 'e.g. coal, port, start'));
 const F = (label, inner, cls = '') => `<div class="f ${cls}"><label>${label}</label>${inner}</div>`;
 const sec = (title, body, extra = '') => `<div class="sec"><h3>${title}<span class="grow"></span>${extra}</h3>${body}</div>`;
 function bind(key, get, after, opts = {}) { BT[key] = { get, after, ...opts }; return `data-bind="${key}"`; }
@@ -207,13 +212,14 @@ function itemCards(items, ctxKey, after, selIdx) {
     const scale = F('Size', I.range('s', it.s || 1, 0.2, 3, 0.05));
     const rot = F('Rotate', I.range('r', it.r || 0, -180, 180, 5));
     const nameFields = `${F('Name', I.text('name', it.name, 'City name'))}${F('Name pos.', I.seg('namePos', it.namePos || 'below', [['below', 'Below'], ['above', 'Above']]))}${F('Name size', I.range('ns', it.ns || 1, 0.4, 3, 0.05))}`;
+    const placeFields = `${F('Tags', I.text('tags', it.tags, 'e.g. port, start'))}${F('Real place', I.text('place', it.place, 'latitude, longitude'))}`;
     const revFields = `${F('Revenue', I.text('rev', it.rev, 'e.g. 20'))}${F('Rev. side', I.select('revPos', it.revPos || 'left', [['left', 'Left'], ['right', 'Right'], ['top', 'Top'], ['bottom', 'Bottom'], ['tl', 'Top-left'], ['tr', 'Top-right']]))}`;
     let body = '';
     switch (it.t) {
       case 'icon': body = F('Icon', I.select('icon', it.icon, iconOptions())) + F('Color', I.optColor('color', it.color, (ICONS[it.icon] || {}).color)) + scale + rot + pos; break;
       case 'img': body = F('Image', I.select('ref', it.ref, assetOptions())) + scale + rot + pos; break;
-      case 'city': body = F('Slots', I.seg('slots', it.slots, [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6']], 'num')) + revFields + F('Home marks', I.text('labels', it.labels, 'PRR, B&O (one per slot)')) + nameFields + F('Fill', I.optColor('fill', it.fill, '#ffffff')) + scale + rot + pos; break;
-      case 'town': body = F('Style', I.seg('style', it.style || 'dot', [['dot', 'Dot'], ['bar', 'Bar'], ['disc', 'Disc']])) + revFields + nameFields + F('Color', I.optColor('fill', it.fill, it.style === 'disc' ? '#ffffff' : '#111111')) + scale + rot + pos; break;
+      case 'city': body = F('Slots', I.seg('slots', it.slots, [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6']], 'num')) + revFields + F('Home marks', I.text('labels', it.labels, 'PRR, B&O (one per slot)')) + nameFields + placeFields + F('Fill', I.optColor('fill', it.fill, '#ffffff')) + scale + rot + pos; break;
+      case 'town': body = F('Style', I.seg('style', it.style || 'dot', [['dot', 'Dot'], ['bar', 'Bar'], ['disc', 'Disc']])) + revFields + nameFields + placeFields + F('Color', I.optColor('fill', it.fill, it.style === 'disc' ? '#ffffff' : '#111111')) + scale + rot + pos; break;
       case 'text': body = `<div class="f full">${I.area('text', it.text, 2)}</div>` +
         F('Style', I.select('style', it.style || 'plain', [['plain', 'Plain'], ['box', 'Box'], ['circle', 'Circle'], ['hexagon', 'Hexagon'], ['triangle', 'Triangle (mountain cost)'], ['wave', 'Wave (water cost)'], ['flag', 'Background only']])) +
         F('Text size', I.range('size', it.size || 0.28, 0.08, 1.2, 0.01)) + F('Text color', I.color('color', it.color || '#111111')) +
@@ -307,6 +313,8 @@ function hexPanel(k) {
   const nSides = hexsideCount([k]);
   out += sec('Hexsides', `${nSides ? `<div class="help" style="margin-top:0">${nSides} side${nSides === 1 ? ' has a' : 's have a'} style (river, border, hidden line…).</div>` : '<div class="help" style="margin-top:0">All six sides are plain.</div>'}
     <button class="btn sm" data-act="sidesReset" ${nSides ? '' : 'disabled'}>Reset hexsides to plain</button>`);
+  out += sec('Game data', `<div ${bind('hxgd', () => getHex(k, true), () => cleanHex(k))}>${gameDataFields(h || {}, ty)}</div>
+    <div class="help">For <b>File › Export game data</b>; not drawn. Leave empty to use the hex type's.</div>`);
   out += linesSection(k);
   out += sec('Actions', `<div class="btngrid"><button class="btn sm" data-act="typeFromHex">Save as hex type</button><button class="btn sm" data-act="clearHex">Clear hex</button>
     ${ty || (h && h.fill) ? `<button class="btn sm" data-act="detachType">${ty ? 'Detach from type' : 'Remove color'}</button>` : ''}</div>
@@ -350,6 +358,7 @@ function typePanel(t) {
       ${F('Name', I.text('name', t.name))}
       ${F('Color', `<div class="row">${I.optColor('fill', t.fill, '#c9a77c', 'Fill')}</div>`)}
     </div>
+    <div ${bind('tygd', () => t, () => schedulePaper())}>${gameDataFields(t)}</div>
     ${F('Image fill', `<select data-act-sel="typeImg"><option value="">— none —</option>${Object.entries(P.assets).map(([id, a]) => `<option value="${id}" ${t.img && t.img.ref === id ? 'selected' : ''}>${esc(a.name || id)}</option>`).join('')}</select>`)}
     <div class="help">Used by <b>${users}</b> hex${users === 1 ? '' : 'es'}. Changes here update all of them.</div>
     <div class="btngrid" style="margin-top:6px"><button class="btn sm pri" data-act="paintType" data-id="${t.id}">Paint with this type</button><button class="btn sm" data-act="dupType" data-id="${t.id}">Duplicate</button>
@@ -404,7 +413,8 @@ function objPanel(o) {
     body = `<div ${bind('o', () => o, (f) => { if (f === 'under') { renderObjects(); renderOverlay(); } else after(f); })}>
       ${F('Fill', I.optColor('fill', o.fill, '#79b8e8', 'Fill'))}${F('Fill opacity', I.range('opacity', o.opacity ?? 1, 0.05, 1, 0.05))}
       ${F('Outline', I.color('stroke', o.stroke || '#222222'))}${F('Line width', I.range('sw', o.sw ?? 2, 0, 20, 0.5))}
-      ${I.check('dashed', o.dashed, 'Dashed outline')}${I.check('smooth', o.smooth, 'Smooth curves')}${I.check('under', o.under, 'Behind the hex grid')}</div>
+      ${I.check('dashed', o.dashed, 'Dashed outline')}${I.check('smooth', o.smooth, 'Smooth curves')}${I.check('under', o.under, 'Behind the hex grid')}
+      ${F('Region name', I.text('name', o.name, 'e.g. Bavaria'))}${F('Region tags', I.text('tags', o.tags, 'e.g. country'))}</div>
       <div class="help">${o.pts.length} points. Drag points to reshape (they snap to hex corners; hold Alt to place freely). Click a small dot on an edge to add a point; Shift-click a point to remove it.</div>`;
   } else if (o.t === 'table') {
     body = `<div ${bind('o', () => o, after)}>${F('Title', I.text('title', o.title, 'Optional'))}

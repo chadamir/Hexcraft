@@ -195,7 +195,7 @@ function getHex(k, create) {
   if (!h && create) { h = P.hexes[k] = { items: [], track: [] }; }
   return h;
 }
-function hexIsEmpty(h) { return !h || (!h.fill && !h.img && !h.type && !(h.items && h.items.length) && !(h.track && h.track.length) && !(h.outline && h.outline.color)); }
+function hexIsEmpty(h) { return !h || (!h.fill && !h.img && !h.type && !(h.items && h.items.length) && !(h.track && h.track.length) && !(h.outline && h.outline.color) && !h.kind && !(h.cost !== undefined && h.cost !== '') && !h.tags); }
 function hexType(h) { return h && h.type ? (P.types || []).find((t) => t.id === h.type) : null; }
 function effFill(h) { const t = hexType(h); return (h && h.fill) || (t && t.fill) || null; }
 function cleanHex(k) { const h = P.hexes[k]; if (hexIsEmpty(h)) delete P.hexes[k]; }

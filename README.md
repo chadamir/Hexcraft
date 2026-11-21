@@ -12,6 +12,7 @@ A WYSIWYG hex map editor for train games: 18xx, Age of Steam, cube rails and any
 - Companies: generated or uploaded token logos, share certificates, charters, private cards, home cities
 - Export PNG, SVG and vector PDF (single page, fit to sheet, or tiled print-and-assemble); printable component sheets
 - Import and export 18xx Maker game files
+- Export game data (`.game.json`): every hex with coordinate, terrain kind, build cost and tags; cities and towns; hexsides; regions; companies — for turning a map into a playable online game. See [GAME-DATA.md](GAME-DATA.md)
 - Your own icons and background images; autosave in the browser plus downloadable project files
 
 ## Saving

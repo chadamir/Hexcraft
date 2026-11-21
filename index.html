@@ -213,6 +213,8 @@ input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
         <hr>
         <button data-act="maker-import">Import 18xx Maker game (.json)…</button>
         <button data-act="maker-export">Export for 18xx Maker (.json)</button>
+        <hr>
+        <button data-act="gamedata-export">Export game data (.json)</button>
       </div>
     </div>
     <div class="menu" id="insertMenu">
@@ -244,6 +246,7 @@ input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
         <button data-act="help-images">Your own icons &amp; backgrounds</button>
         <button data-act="help-saving">Saving your work</button>
         <button data-act="help-export">Exporting &amp; printing</button>
+        <button data-act="help-gamedata">Game data for programs</button>
         <hr>
         <button data-act="toggle-tips" id="tipsToggle">Hover tips: on</button>
       </div>
@@ -1095,7 +1098,7 @@ function getHex(k, create) {
   if (!h && create) { h = P.hexes[k] = { items: [], track: [] }; }
   return h;
 }
-function hexIsEmpty(h) { return !h || (!h.fill && !h.img && !h.type && !(h.items && h.items.length) && !(h.track && h.track.length) && !(h.outline && h.outline.color)); }
+function hexIsEmpty(h) { return !h || (!h.fill && !h.img && !h.type && !(h.items && h.items.length) && !(h.track && h.track.length) && !(h.outline && h.outline.color) && !h.kind && !(h.cost !== undefined && h.cost !== '') && !h.tags); }
 function hexType(h) { return h && h.type ? (P.types || []).find((t) => t.id === h.type) : null; }
 function effFill(h) { const t = hexType(h); return (h && h.fill) || (t && t.fill) || null; }
 function cleanHex(k) { const h = P.hexes[k]; if (hexIsEmpty(h)) delete P.hexes[k]; }
@@ -2721,6 +2724,11 @@ const I = {
   area: (f, v, rows = 5, ph = '') => `<textarea data-f="${f}" rows="${rows}" spellcheck="false" placeholder="${esc(ph)}">${esc(v ?? '')}</textarea>`,
   seg: (f, v, opts, t = '') => `<div class="seg" data-segf="${f}"${t ? ` data-t="${t}"` : ''}>${opts.map(([val, lab]) => `<button type="button" data-v="${esc(val)}" class="${String(val) === String(v) ? 'on' : ''}">${esc(lab)}</button>`).join('')}</div>`,
 };
+// Game data fields (File › Export game data): terrain kind (free text with suggestions), build cost, tags
+const kindInput = (v, ph) => `<input type="text" data-f="kind" list="hcKinds" value="${esc(v ?? '')}" placeholder="${esc(ph || 'e.g. mountain')}"><datalist id="hcKinds">${HEX_KINDS.map((k) => `<option value="${k}">`).join('')}</datalist>`;
+const gameDataFields = (o, inherit) => F('Kind', kindInput(o.kind, inherit && inherit.kind ? inherit.kind + ' (from type)' : '')) +
+  F('Build cost', I.text('cost', o.cost, inherit && inherit.cost !== undefined && inherit.cost !== '' ? inherit.cost + ' (from type)' : 'e.g. 60')) +
+  F('Tags', I.text('tags', o.tags, 'e.g. coal, port, start'));
 const F = (label, inner, cls = '') => `<div class="f ${cls}"><label>${label}</label>${inner}</div>`;
 const sec = (title, body, extra = '') => `<div class="sec"><h3>${title}<span class="grow"></span>${extra}</h3>${body}</div>`;
 function bind(key, get, after, opts = {}) { BT[key] = { get, after, ...opts }; return `data-bind="${key}"`; }
@@ -2915,13 +2923,14 @@ function itemCards(items, ctxKey, after, selIdx) {
     const scale = F('Size', I.range('s', it.s || 1, 0.2, 3, 0.05));
     const rot = F('Rotate', I.range('r', it.r || 0, -180, 180, 5));
     const nameFields = `${F('Name', I.text('name', it.name, 'City name'))}${F('Name pos.', I.seg('namePos', it.namePos || 'below', [['below', 'Below'], ['above', 'Above']]))}${F('Name size', I.range('ns', it.ns || 1, 0.4, 3, 0.05))}`;
+    const placeFields = `${F('Tags', I.text('tags', it.tags, 'e.g. port, start'))}${F('Real place', I.text('place', it.place, 'latitude, longitude'))}`;
     const revFields = `${F('Revenue', I.text('rev', it.rev, 'e.g. 20'))}${F('Rev. side', I.select('revPos', it.revPos || 'left', [['left', 'Left'], ['right', 'Right'], ['top', 'Top'], ['bottom', 'Bottom'], ['tl', 'Top-left'], ['tr', 'Top-right']]))}`;
     let body = '';
     switch (it.t) {
       case 'icon': body = F('Icon', I.select('icon', it.icon, iconOptions())) + F('Color', I.optColor('color', it.color, (ICONS[it.icon] || {}).color)) + scale + rot + pos; break;
       case 'img': body = F('Image', I.select('ref', it.ref, assetOptions())) + scale + rot + pos; break;
-      case 'city': body = F('Slots', I.seg('slots', it.slots, [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6']], 'num')) + revFields + F('Home marks', I.text('labels', it.labels, 'PRR, B&O (one per slot)')) + nameFields + F('Fill', I.optColor('fill', it.fill, '#ffffff')) + scale + rot + pos; break;
-      case 'town': body = F('Style', I.seg('style', it.style || 'dot', [['dot', 'Dot'], ['bar', 'Bar'], ['disc', 'Disc']])) + revFields + nameFields + F('Color', I.optColor('fill', it.fill, it.style === 'disc' ? '#ffffff' : '#111111')) + scale + rot + pos; break;
+      case 'city': body = F('Slots', I.seg('slots', it.slots, [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6']], 'num')) + revFields + F('Home marks', I.text('labels', it.labels, 'PRR, B&O (one per slot)')) + nameFields + placeFields + F('Fill', I.optColor('fill', it.fill, '#ffffff')) + scale + rot + pos; break;
+      case 'town': body = F('Style', I.seg('style', it.style || 'dot', [['dot', 'Dot'], ['bar', 'Bar'], ['disc', 'Disc']])) + revFields + nameFields + placeFields + F('Color', I.optColor('fill', it.fill, it.style === 'disc' ? '#ffffff' : '#111111')) + scale + rot + pos; break;
       case 'text': body = `<div class="f full">${I.area('text', it.text, 2)}</div>` +
         F('Style', I.select('style', it.style || 'plain', [['plain', 'Plain'], ['box', 'Box'], ['circle', 'Circle'], ['hexagon', 'Hexagon'], ['triangle', 'Triangle (mountain cost)'], ['wave', 'Wave (water cost)'], ['flag', 'Background only']])) +
         F('Text size', I.range('size', it.size || 0.28, 0.08, 1.2, 0.01)) + F('Text color', I.color('color', it.color || '#111111')) +
@@ -3015,6 +3024,8 @@ function hexPanel(k) {
   const nSides = hexsideCount([k]);
   out += sec('Hexsides', `${nSides ? `<div class="help" style="margin-top:0">${nSides} side${nSides === 1 ? ' has a' : 's have a'} style (river, border, hidden line…).</div>` : '<div class="help" style="margin-top:0">All six sides are plain.</div>'}
     <button class="btn sm" data-act="sidesReset" ${nSides ? '' : 'disabled'}>Reset hexsides to plain</button>`);
+  out += sec('Game data', `<div ${bind('hxgd', () => getHex(k, true), () => cleanHex(k))}>${gameDataFields(h || {}, ty)}</div>
+    <div class="help">For <b>File › Export game data</b>; not drawn. Leave empty to use the hex type's.</div>`);
   out += linesSection(k);
   out += sec('Actions', `<div class="btngrid"><button class="btn sm" data-act="typeFromHex">Save as hex type</button><button class="btn sm" data-act="clearHex">Clear hex</button>
     ${ty || (h && h.fill) ? `<button class="btn sm" data-act="detachType">${ty ? 'Detach from type' : 'Remove color'}</button>` : ''}</div>
@@ -3058,6 +3069,7 @@ function typePanel(t) {
       ${F('Name', I.text('name', t.name))}
       ${F('Color', `<div class="row">${I.optColor('fill', t.fill, '#c9a77c', 'Fill')}</div>`)}
     </div>
+    <div ${bind('tygd', () => t, () => schedulePaper())}>${gameDataFields(t)}</div>
     ${F('Image fill', `<select data-act-sel="typeImg"><option value="">— none —</option>${Object.entries(P.assets).map(([id, a]) => `<option value="${id}" ${t.img && t.img.ref === id ? 'selected' : ''}>${esc(a.name || id)}</option>`).join('')}</select>`)}
     <div class="help">Used by <b>${users}</b> hex${users === 1 ? '' : 'es'}. Changes here update all of them.</div>
     <div class="btngrid" style="margin-top:6px"><button class="btn sm pri" data-act="paintType" data-id="${t.id}">Paint with this type</button><button class="btn sm" data-act="dupType" data-id="${t.id}">Duplicate</button>
@@ -3112,7 +3124,8 @@ function objPanel(o) {
     body = `<div ${bind('o', () => o, (f) => { if (f === 'under') { renderObjects(); renderOverlay(); } else after(f); })}>
       ${F('Fill', I.optColor('fill', o.fill, '#79b8e8', 'Fill'))}${F('Fill opacity', I.range('opacity', o.opacity ?? 1, 0.05, 1, 0.05))}
       ${F('Outline', I.color('stroke', o.stroke || '#222222'))}${F('Line width', I.range('sw', o.sw ?? 2, 0, 20, 0.5))}
-      ${I.check('dashed', o.dashed, 'Dashed outline')}${I.check('smooth', o.smooth, 'Smooth curves')}${I.check('under', o.under, 'Behind the hex grid')}</div>
+      ${I.check('dashed', o.dashed, 'Dashed outline')}${I.check('smooth', o.smooth, 'Smooth curves')}${I.check('under', o.under, 'Behind the hex grid')}
+      ${F('Region name', I.text('name', o.name, 'e.g. Bavaria'))}${F('Region tags', I.text('tags', o.tags, 'e.g. country'))}</div>
       <div class="help">${o.pts.length} points. Drag points to reshape (they snap to hex corners; hold Alt to place freely). Click a small dot on an edge to add a point; Shift-click a point to remove it.</div>`;
   } else if (o.t === 'table') {
     body = `<div ${bind('o', () => o, after)}>${F('Title', I.text('title', o.title, 'Optional'))}
@@ -3471,6 +3484,23 @@ const HELP = [
       <li><b>Company components</b> print from the Companies tab — see <i>Companies, shares &amp; charters</i>.</li>
       <li>The light “page” behind the map on the canvas is the export area. Adjust its margin in map settings › Colors › Page margin.</li>
     </ul>`],
+  ['gamedata', 'Game data for programs', `
+    <p>The drawing is for people. <b>File › Export game data</b> saves what the map <i>means</i> as a <code>.game.json</code> file a program can read — for turning a map into a playable online game without copying it by hand.</p>
+    <ul>
+      <li><b>Every hex</b> on the map, with its coordinate (A1…), column and row, its centre on the page, its <b>Kind</b> (terrain), <b>Build cost</b> and <b>Tags</b>.</li>
+      <li><b>Cities and towns</b>: name, slots, revenue values, home marks, which company has its home there, tags and real place.</li>
+      <li><b>Hexsides</b> with a style (river, impassable, border…), as the two hexes they separate.</li>
+      <li><b>Regions</b> drawn with the Region tool, by name, with the hexes inside them; <b>companies</b> with their home city; free text labels.</li>
+    </ul>
+    <h4>Filling it in</h4>
+    <ul>
+      <li>Set <b>Kind</b>, <b>Build cost</b> and <b>Tags</b> on a <b>hex type</b> once (e.g. Mountain: kind <i>mountain</i>, cost <i>60</i>); every hex painted with it gets them. A hex's own Game data section overrides its type.</li>
+      <li>If you don't set a cost, a <b>Cost</b> stamp printed on the hex (like “$60”) is used.</li>
+      <li><b>Tags</b> are any words, comma separated, for whatever a game needs: <i>coal, port, start, home:PRR, border</i>.</li>
+      <li><b>Real place</b> on a city or town (latitude, longitude, e.g. <i>40.44, -79.99</i>) lets a program draw real coastlines and borders under the map.</li>
+      <li>Give each region a <b>Region name</b> (countries, provinces, companies' territories).</li>
+    </ul>
+    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind.</p>`],
 ];
 function helpDialog(sec = 'start') {
   closeMenus();
@@ -3514,6 +3544,12 @@ const FIELD_TIPS = {
   'Revenue': 'Revenue value shown in a small circle beside the city or town. Leave empty for none.',
   'Rev. side': 'Which side the revenue circle sits on.',
   'Home marks': 'Text inside each slot, comma separated — e.g. company home stations.',
+  'Kind': 'Terrain kind for the game data export (plain, mountain, water…). Not drawn. On a hex, overrides its type.',
+  'Build cost': 'Cost to build in this hex, as a number, for the game data export. Not drawn. Empty uses the hex type’s cost, or a printed Cost stamp.',
+  'Tags': 'Any words, comma separated (coal, port, start, home:PRR…), passed on in the game data export. Not drawn.',
+  'Real place': 'Latitude and longitude of the real place (e.g. 40.44, -79.99), for the game data export. Not drawn.',
+  'Region name': 'Name of this region in the game data export (e.g. a country or province).',
+  'Region tags': 'Any words, comma separated, passed on with this region in the game data export.',
   'Name pos.': 'Put the name above or below.', 'Name size': 'Size of the name text.',
   'Fill': 'Fill color. Untick for the default.', 'Style': 'Visual style.',
   'Text size': 'Size of the text.', 'Text color': 'Color of the text.',
@@ -3565,7 +3601,7 @@ const ACT_TIPS = {
   save: 'Save to your library (Ctrl S).', saveas: 'Save a duplicate under a new name.', savefile: 'Download a .hexmap.json project file you can open later.',
   openfile: 'Open a .hexmap.json project file.', 'ins-market1': 'A one-dimensional share price or revenue track.', 'ins-market2': 'A 2D stock market grid with zones and ledges.',
   'ins-table': 'A table for costs, trains, phases or a legend — supports icons.', 'ins-text': 'A free text box for titles and notes.', 'ins-revbox': 'Phase revenue boxes for an off-board area, as a free object you can place anywhere.',
-  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
+  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
 };
 const TOP_TIPS = {
   '#projName': 'Map name — click to rename.', '#undoBtn': 'Undo (Ctrl Z)', '#redoBtn': 'Redo (Ctrl Shift Z)',
@@ -4800,6 +4836,158 @@ function mkHexOut(c, r, h, colorName) {
 }
 
 // =====================================================================
+//  Game data export: what the map means, for programs that play the game
+//  (File › Export game data). The drawing is for people; this file is for
+//  software: every hex with its coordinate, terrain kind, build cost and
+//  tags; cities and towns with names, slots, values and home companies;
+//  hexsides as pairs of hexes; named regions; companies.
+// =====================================================================
+
+const GAME_DATA_FORMAT = 'hexcraft-game-data', GAME_DATA_VERSION = 1;
+// Suggested terrain kinds (any word may be used; these are only offered in the editor)
+const HEX_KINDS = ['plain', 'rough', 'hill', 'mountain', 'forest', 'swamp', 'desert', 'water', 'lake', 'river', 'coast', 'offboard', 'city', 'town', 'port'];
+
+// "coal, port , start" -> ['coal', 'port', 'start']
+const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
+// every number in a string: "20/30/40" -> [20, 30, 40]; "$60" -> [60]
+const numbersIn = (s) => (String(s ?? '').match(/-?\d+(\.\d+)?/g) || []).map(Number);
+// "40.44, -79.99" -> [40.44, -79.99] (latitude, longitude), or null
+function placeOf(s) {
+  const n = numbersIn(s);
+  return n.length === 2 && Math.abs(n[0]) <= 90 && Math.abs(n[1]) <= 180 ? n : null;
+}
+// A cost printed on the hex (a Cost stamp: triangle or wave label, or a label like "$60"), as a number
+function printedCost(items) {
+  for (const it of items || []) {
+    if (it.t !== 'text') continue;
+    const txt = String(it.text || '').trim();
+    if (it.style === 'triangle' || it.style === 'wave' || /^\$\s?\d+$/.test(txt)) { const n = numbersIn(txt); if (n.length === 1) return n[0]; }
+  }
+  return null;
+}
+// "y20 g30 b40 x60" -> [{phase:'yellow', value:20}, …]
+function phaseValues(s) {
+  return String(s || '').trim().split(/[\s,]+/).filter(Boolean).map((tok) => {
+    const m = tok.match(/^([a-z]*)(-?\d+)/i); if (!m) return null;
+    const code = (m[1] || '').toLowerCase(), zone = ZONE_CODES[code];
+    return { phase: zone ? zone[0].toLowerCase() : code || null, value: Number(m[2]) };
+  }).filter(Boolean);
+}
+// Is a point inside a polygon (list of [x, y])?
+function insidePolygon(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function gameData() {
+  const hexId = (c, r) => coordLabel(c, r) || key(c, r);
+  const ref = (c, r) => ({ id: hexId(c, r), col: c, row: r });
+  // which company has its home in which city slot: 'c,r|item|slot' -> company id
+  const homeOf = {};
+  (P.companies || []).forEach((co) => { if (co.home) homeOf[co.home] = co.id; });
+
+  const hexes = [];
+  for (let r = 0; r < P.grid.rows; r++) for (let c = 0; c < P.grid.cols; c++) {
+    if (!exists(c, r)) continue;
+    const k = key(c, r), h = P.hexes[k] || null, ty = hexType(h);
+    const items = [...((ty && ty.items) || []), ...((h && h.items) || [])];
+    const typeCount = ((ty && ty.items) || []).length;   // items from the type come first; the hex's own items follow
+    const [x, y] = center(c, r);
+    const cost = h && h.cost !== undefined && h.cost !== '' ? numbersIn(h.cost)[0] ?? null
+      : ty && ty.cost !== undefined && ty.cost !== '' ? numbersIn(ty.cost)[0] ?? null
+      : printedCost(items);
+    const out = {
+      ...ref(c, r), x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100,
+      kind: (h && h.kind) || (ty && ty.kind) || (h || ty ? null : 'plain'),
+      cost: cost ?? null,
+      tags: [...new Set([...splitTags(ty && ty.tags), ...splitTags(h && h.tags)])],
+      type: ty ? ty.name : null,
+      color: effFill(h) || null,
+      label: ((h && h.items) || []).filter((it) => it.nm && it.text).map((it) => it.text)[0] || null,
+      cities: [], towns: [], revenues: [], texts: [], track: [],
+    };
+    items.forEach((it, i) => {
+      // the index used by company homes counts only this hex's own items
+      const own = i - typeCount;
+      if (it.t === 'city') {
+        const homes = [];
+        if (own >= 0) for (let slot = 0; slot < (it.slots || 1); slot++) { const id = homeOf[`${k}|${own}|${slot}`]; if (id) homes.push({ slot, company: id }); }
+        out.cities.push({ name: it.name || null, slots: it.slots || 1, values: numbersIn(it.rev), revenue: it.rev || null,
+          marks: splitTags(it.labels), homes, tags: splitTags(it.tags), place: placeOf(it.place) });
+      } else if (it.t === 'town') {
+        out.towns.push({ name: it.name || null, values: numbersIn(it.rev), revenue: it.rev || null, style: it.style || 'dot',
+          tags: splitTags(it.tags), place: placeOf(it.place) });
+      } else if (it.t === 'phases') {
+        out.revenues.push(...phaseValues(it.values));
+      } else if (it.t === 'text' && !it.nm && it.text) {
+        out.texts.push(String(it.text));
+      }
+    });
+    (h && h.track || []).forEach((t) => out.track.push({ from: t.a, to: t.b, color: t.color || null, style: t.style || null }));
+    if (!out.label && out.cities.length === 1 && out.cities[0].name) out.label = out.cities[0].name;
+    if (!out.label && out.towns.length === 1 && out.towns[0].name) out.label = out.towns[0].name;
+    hexes.push(out);
+  }
+
+  // hexsides with a style, as the two hexes they separate (b is null at the map's edge)
+  const sides = [];
+  for (const ek in P.edges) {
+    const e = P.edges[ek]; if (!e || !e.t || e.t === 'plain') continue;
+    const { c, r, i } = edgeFromKey(ek);
+    if (!exists(c, r)) continue;
+    const [nc, nr] = neighbor(c, r, i);
+    sides.push({ a: ref(c, r), b: exists(nc, nr) ? ref(nc, nr) : null, side: i,
+      type: e.t === 'hide' ? 'merged' : e.t, label: e.label || null });
+  }
+
+  // regions drawn with the Region tool, with the hexes whose centres they contain
+  const regions = (P.objects || []).filter((o) => o.t === 'region' && o.pts && o.pts.length > 2).map((o, n) => {
+    const pts = o.pts.map(([px, py]) => [px + (o.x || 0), py + (o.y || 0)]);
+    return { name: o.name || `Region ${n + 1}`, tags: splitTags(o.tags), color: o.fill || null,
+      hexes: hexes.filter((hx) => insidePolygon(hx.x, hx.y, pts)).map((hx) => hx.id) };
+  });
+
+  const companies = (P.companies || []).map((co) => {
+    let home = null;
+    if (co.home) { const [hk, i, sl] = co.home.split('|'); const [c, r] = unkey(hk); home = { ...ref(c, r), city: +i, slot: +sl }; }
+    return { id: co.id, abbr: co.abbr || null, name: co.name || null, kind: co.kind || null, color: co.color || null,
+      textColor: co.textColor || null, home, destination: co.dest ? hexId(...unkey(co.dest)) : null,
+      tokens: co.tokens ? co.tokens.count : null, tokenCosts: co.tokens ? co.tokens.costs || null : null };
+  });
+
+  // free text on the page (titles, sea names…) with its position
+  const labels = (P.objects || []).filter((o) => o.t === 'text' && o.text).map((o) => ({ text: o.text, x: Math.round(o.x || 0), y: Math.round(o.y || 0) }));
+
+  const b = hexBoundsExisting();
+  return {
+    format: GAME_DATA_FORMAT, version: GAME_DATA_VERSION, app: 'hexcraft', name: P.name, exported: new Date().toISOString(),
+    grid: { orient: P.grid.orient, stagger: P.grid.stagger, cols: P.grid.cols, rows: P.grid.rows, size: P.grid.size, coords: P.style.coords,
+      bounds: { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } },
+    hexes, sides, regions, companies, labels,
+  };
+}
+
+// File › Export game data: checks the map, then downloads <name>.game.json
+function exportGameData() {
+  closeMenus();
+  const data = gameData();
+  const notes = [];
+  const unnamed = data.hexes.reduce((n, h) => n + h.cities.filter((c) => !c.name).length + h.towns.filter((t) => !t.name).length, 0);
+  if (unnamed) notes.push(`${unnamed} cit${unnamed === 1 ? 'y or town has' : 'ies or towns have'} no name`);
+  const names = {}; data.hexes.forEach((h) => [...h.cities, ...h.towns].forEach((p) => { if (p.name) names[p.name] = (names[p.name] || 0) + 1; }));
+  const dup = Object.keys(names).filter((n) => names[n] > 1);
+  if (dup.length) notes.push(`names used more than once: ${dup.slice(0, 6).join(', ')}${dup.length > 6 ? '…' : ''}`);
+  const noKind = data.hexes.filter((h) => !h.kind).length;
+  if (noKind) notes.push(`${noKind} hex${noKind === 1 ? ' has' : 'es have'} no terrain kind (set Kind on the hex type or the hex)`);
+  saveBlob(slug(P.name) + '.game.json', JSON.stringify(data, null, 1), 'application/json');
+  if (notes.length) toast('Exported. Check: ' + notes.join('; ') + '.', true);
+}
+
+// =====================================================================
 //  Files, uploads, saving (cloud library + browser), export, presets
 // =====================================================================
 
@@ -5365,6 +5553,7 @@ document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')
 const ACTS = {
   new: newDialog, open: openDialog, save: () => doSave(), saveas: saveAsCopy,
   savefile: () => saveBlob(slug(P.name) + '.hexmap.json', fullJSON(), 'application/json'),
+  'gamedata-export': () => exportGameData(),
   openfile: openFileFlow,
   'maker-import': () => pickFiles('.json,application/json', false, async (files) => { const txt = await readText(files[0]); loadProject(txt, { cloud: false }); }),
   'maker-export': () => { try { const g = exportMaker(); saveBlob(slug(P.name) + '.18xxmaker.json', JSON.stringify(g, null, 2), 'application/json'); } catch (e) { console.error(e); toast('18xx Maker export failed: ' + e.message, true); } },

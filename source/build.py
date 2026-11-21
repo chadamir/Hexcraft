@@ -5,7 +5,7 @@ def lib(p):
     t = re.sub(r'//# sourceMappingURL=.*', '', t)
     return t.replace('</script', '<\\/script')
 shell = (root/'src/shell.html').read_text()
-app = '\n'.join((root/'src'/f).read_text() for f in ['core.js','ui.js','props.js','help.js','comp.js','compui.js','maker.js','io.js'])
+app = '\n'.join((root/'src'/f).read_text() for f in ['core.js','ui.js','props.js','help.js','comp.js','compui.js','clip.js','maker.js','gamedata.js','io.js'])
 assert '</script' not in app
 out = shell.replace('/*VENDOR_JSPDF*/', lib('node_modules/jspdf/dist/jspdf.umd.min.js')) \
            .replace('/*VENDOR_SVG2PDF*/', lib('node_modules/svg2pdf.js/dist/svg2pdf.umd.min.js')) \
@@ -16,7 +16,7 @@ print('built', len(out)//1024, 'KB')
 
 # ---- help / hover-tip coverage check ----
 import re as _re
-src = {f: (root/'src'/f).read_text() for f in ['core.js','ui.js','props.js','help.js','comp.js','compui.js','maker.js','io.js']}
+src = {f: (root/'src'/f).read_text() for f in ['core.js','ui.js','props.js','help.js','comp.js','compui.js','clip.js','maker.js','gamedata.js','io.js']}
 shell_t = (root/'src/shell.html').read_text(); help_t = src['help.js']; allsrc = ''.join(src.values())
 acts = set(_re.findall(r'data-act="([a-zA-Z0-9-]+)"', allsrc + shell_t))
 missing_acts = sorted(a for a in acts if not a.startswith('help-') and not _re.search(r"(['\"]?)%s\1\s*:" % _re.escape(a), help_t))
