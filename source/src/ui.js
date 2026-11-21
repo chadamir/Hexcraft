@@ -11,7 +11,7 @@ const S = {
   tool: 'select',
   brush: { kind: 'color', color: '#f6dc4a' },
   stamp: { kind: 'icon', icon: 'mountain' },
-  stampOpts: { scale: 1, rot: 0, color: '', snap: 'points' },
+  stampOpts: { scale: 1, rot: 0, color: '', snap: 'center' },
   trackOpts: { color: '#111111', w: 1, style: 'std', casing: '#ffffff', geo: '' },
   edgeOpts: { t: 'river', color: '', w: 1, label: '' },
   eraseMode: 'all',
@@ -225,8 +225,8 @@ const TOOL_HINTS = {
   paint: 'Drag to paint hexes with the current color or hex type. Alt-click samples a hex. Painting a removed hex restores it.',
   fill: 'Click to fill all connected hexes that look the same.',
   erase: 'Drag across hexes. Choose what to erase below.',
-  stamp: 'Click inside a hex to place the selected stamp there. Alt-click (or click off the grid) to place it freely on the page.',
-  text: 'Click a hex to add a label (city names, letters, costs). Alt-click or click off the grid for a free text box.',
+  stamp: 'Click a hex to place the selected stamp in its center (Shift-click snaps to the nearest spot; change Placement below). Alt-click (or click off the grid) to place it freely on the page.',
+  text: 'Click a hex to add a label in its center (city names, letters, costs; Shift-click snaps to the nearest spot). Alt-click or click off the grid for a free text box.',
   track: 'Drag from a hex edge, center, city or town across hexes to lay track. End on a city/center to connect to it. Shift-drag removes track.',
   hexside: 'Click a hex edge to add or remove the side style. Drag along edges to paint several. Shift-click removes.',
   pan: 'Drag to move around the map. Mouse wheel zooms.',
@@ -252,6 +252,8 @@ function snapLocal(lx, ly, mode) {
   let best = pts[0], bd = Infinity; pts.forEach((p) => { const d = (p[0] - lx) ** 2 + (p[1] - ly) ** 2; if (d < bd) { bd = d; best = p; } });
   return best.map((v) => Math.round(v * 1000) / 1000);
 }
+// Stamp and Text tools: where a new item goes in the hex (Center by default; Shift-click snaps to the nearest spot)
+function placeMode(e) { const m = S.stampOpts.snap; return m === 'center' && e && e.shiftKey ? 'points' : m; }
 function localOf(c, r, wx, wy) { const [cx, cy] = center(c, r); return [(wx - cx) / R(), (wy - cy) / R()]; }
 
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -497,7 +499,7 @@ const TEXT_PRESETS = {
 function stampDown(e, wx, wy, c, r) {
   const st = S.stamp;
   if (!e.altKey && exists(c, r)) {
-    const k = key(c, r); const [lx, ly] = localOf(c, r, wx, wy); const [sx, sy] = snapLocal(lx, ly, S.stampOpts.snap);
+    const k = key(c, r); const [lx, ly] = localOf(c, r, wx, wy); const [sx, sy] = snapLocal(lx, ly, placeMode(e));
     checkpoint(); const h = getHex(k, true);
     const stx = st.kind === 'wedge' ? { ...st, e: nearestEdge(c, r, wx, wy).i } : st;
     h.items.push(makeStampItem(stx, sx, sy)); renderHex(k);
@@ -516,7 +518,7 @@ function stampDown(e, wx, wy, c, r) {
 }
 function textDown(e, wx, wy, c, r) {
   if (!e.altKey && exists(c, r)) {
-    const k = key(c, r); const [lx, ly] = localOf(c, r, wx, wy); const [sx, sy] = snapLocal(lx, ly, S.stampOpts.snap);
+    const k = key(c, r); const [lx, ly] = localOf(c, r, wx, wy); const [sx, sy] = snapLocal(lx, ly, placeMode(e));
     checkpoint(); const h = getHex(k, true);
     const preset = TEXT_PRESETS[S.textStyle] || TEXT_PRESETS.label;
     h.items.push({ t: 'text', ...clone(preset.item), x: sx, y: sy }); renderHex(k);
@@ -870,11 +872,11 @@ function renderToolOpts() {
   } else if (t === 'stamp' || t === 'text') {
     h = `<h3>${t === 'stamp' ? 'Stamp options' : 'Label options'}</h3>
       ${t === 'text' ? `<div class="f"><label>Style</label><select id="textStyle">${Object.entries(TEXT_PRESETS).map(([k, v]) => `<option value="${k}" ${S.textStyle === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>` : ''}
-      <div class="f"><label>Placement</label><div class="seg" id="snapSeg"><button data-v="points">Snap</button><button data-v="center">Center</button><button data-v="free">Free</button></div></div>
+      <div class="f"><label>Placement</label><div class="seg" id="snapSeg"><button data-v="center">Center</button><button data-v="points">Snap</button><button data-v="free">Free</button></div></div>
       ${t === 'stamp' ? `<div class="f"><label>Size</label><input type="range" id="stScale" min="0.3" max="2.5" step="0.05" value="${S.stampOpts.scale}"></div>
       <div class="f"><label>Rotation</label><input type="range" id="stRot" min="0" max="345" step="15" value="${S.stampOpts.rot}"></div>
       <div class="f"><label>Icon color</label><div class="row"><label class="chk" style="margin:0"><input type="checkbox" id="stColOn" ${S.stampOpts.color ? 'checked' : ''}>Custom</label><input type="color" id="stCol" value="${S.stampOpts.color || '#8b6b4a'}"></div></div>` : ''}
-      <div class="help">Snap places items at the center or one of 12 standard positions. Hold <kbd>Shift</kbd> while dragging an item to snap it.</div>`;
+      <div class="help"><b>Center</b> puts new items in the middle of the hex you click; hold <kbd>Shift</kbd> as you click to snap to the nearest of 12 standard spots instead. <b>Snap</b> uses the spot nearest the mouse; <b>Free</b> places exactly where you click. Drag items with the Select tool to move them (<kbd>Shift</kbd> snaps).</div>`;
   } else if (t === 'track') {
     const o = S.trackOpts;
     const geo = o.geo || P.style.trackGeo || 'curve';

@@ -21,7 +21,7 @@ const HELP = [
       <tr><td><kbd>B</kbd></td><td><b>Paint</b> — drag to color hexes or apply a hex type. <kbd>Alt</kbd>-click samples a hex's color. Also colors stock market cells.</td></tr>
       <tr><td><kbd>G</kbd></td><td><b>Flood fill</b> — fills all connected hexes that currently look the same.</td></tr>
       <tr><td><kbd>E</kbd></td><td><b>Erase</b> — drag to erase everything, just color, just icons/labels, just track, or to remove/restore hexes.</td></tr>
-      <tr><td><kbd>S</kbd></td><td><b>Stamp</b> — place the selected stamp (city, town, icon, cost, upload) where you click inside a hex. <kbd>Alt</kbd>-click places it freely on the page.</td></tr>
+      <tr><td><kbd>S</kbd></td><td><b>Stamp</b> — place the selected stamp (city, town, icon, cost, upload) in the center of the hex you click (<kbd>Shift</kbd>-click snaps to the nearest standard spot; the Placement setting changes this). <kbd>Alt</kbd>-click places it freely on the page.</td></tr>
       <tr><td><kbd>T</kbd></td><td><b>Text</b> — click a hex to add a label; click off the grid (or <kbd>Alt</kbd>-click) for a free text box.</td></tr>
       <tr><td><kbd>K</kbd></td><td><b>Track</b> — drag across hexes to lay pre-printed track. <kbd>Shift</kbd>-drag removes.</td></tr>
       <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes. The <i>Plain</i> style turns edges back to normal.</td></tr>
@@ -262,7 +262,7 @@ const FIELD_TIPS = {
   'Edge line': 'Line drawn along the cut map edge: color and thickness (0 hides it).',
   'Fill opacity': 'How see-through the region fill is.', 'Corner': 'Rounded corners for the text box background.',
   'Box border': 'Outline around the text box background.', 'Zone': 'Color zone of this cell.', 'Paint': 'Custom color for just this cell.',
-  'Placement': 'Snap to standard spots, always the center, or exactly where you click.',
+  'Placement': 'Where new items go in the hex: the center (default; Shift-click snaps to the nearest spot), the standard spot nearest the mouse, or exactly where you click.',
   'Border': 'Outer border color.', 'Box size': 'Width of each revenue box.', 'Edge': 'Which hex edge the off-board arrow sits on.', 'Name color': 'Color of the name text.',
   'Value': 'The number or word printed in this cell.', 'Width mm': 'Width in millimetres at print size.', 'Height mm': 'Height in millimetres at print size.',
   'Outline': 'Outline color (and width) for this hex only — handy for marking special hexes.',
