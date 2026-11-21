@@ -5,7 +5,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const stage = $('#stage'), vpEl = $('#vp');
 const L = {};
-['bgcolor', 'bgimg', 'under', 'clip', 'frame', 'basefill', 'fills', 'grid', 'edges', 'content', 'coords', 'objects', 'overlay'].forEach((n) => (L[n] = $('#L-' + n)));
+['bgcolor', 'bgimg', 'under', 'clip', 'frame', 'basefill', 'fills', 'grid', 'edges', 'links', 'content', 'coords', 'objects', 'overlay'].forEach((n) => (L[n] = $('#L-' + n)));
 
 const S = {
   tool: 'select',
@@ -257,6 +257,7 @@ function localOf(c, r, wx, wy) { const [cx, cy] = center(c, r); return [(wx - cx
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
 stage.addEventListener('pointerdown', (e) => {
   if (e.button === 2) return;
+  if (isTyping()) document.activeElement.blur();   // so Delete and tool keys act on the map right after editing a field
   const [wx, wy] = toWorld(e);
   stage.setPointerCapture(e.pointerId);
   if (e.button === 1 || S.space || S.tool === 'pan') { D = { type: 'pan', sx: e.clientX, sy: e.clientY, vx: S.view.x, vy: S.view.y }; $('#main').classList.add('panning'); return; }
@@ -277,6 +278,7 @@ stage.addEventListener('pointerdown', (e) => {
     case 'hexside': return hexsideDown(e, wx, wy, c, r);
     case 'shape': return shapeDown(e, wx, wy, c, r);
     case 'region': return regionClick(e, wx, wy);
+    case 'link': return linkDown(e, tgt, wx, wy, c, r);
   }
 });
 stage.addEventListener('dblclick', (e) => { if (S.tool === 'region' && S.draft) { if (S.draft.pts.length > 1) { const a = S.draft.pts[S.draft.pts.length - 1], b = S.draft.pts[S.draft.pts.length - 2]; if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) S.draft.pts.pop(); } finishRegion(); } });
@@ -287,6 +289,7 @@ stage.addEventListener('pointermove', (e) => {
   $('#stHex').innerHTML = inGrid(h[0], h[1]) ? `<b>${coordLabel(h[0], h[1]) || '—'}</b> · col ${h[0] + 1}, row ${h[1] + 1}` : '—';
   if (!D) {
     if (S.tool === 'region' && S.draft) { S.draft.cursor = regionSnap(wx, wy, e.altKey); renderOverlay(); return; }
+    if (S.tool === 'link' && S.linkStart) { S.linkCursor = [wx, wy]; renderOverlay(); return; }
     if (S.tool === 'hexside' && exists(h[0], h[1])) { const ne = nearestEdge(h[0], h[1], wx, wy); renderOverlay(edgeHighlight(h[0], h[1], ne.i)); }
     else if (changed) renderOverlay();
     return;
@@ -445,6 +448,8 @@ function selectDown(e, tgt, wx, wy, c, r) {
     D = { type: 'obj', id, sx: wx, sy: wy, ox: o.x, oy: o.y, moved: false };
     return;
   }
+  const lEl = tgt.closest('[data-link]');
+  if (lEl) { select({ kind: 'link', id: lEl.dataset.link }); return; }
   if (S.bgAdjust && P.bgImage) { const b = P.bgImage; if (wx >= b.x && wy >= b.y && wx <= b.x + b.w && wy <= b.y + b.h) { checkpoint(); D = { type: 'bg', sx: wx, sy: wy, ox: b.x, oy: b.y }; return; } }
   // hex click, shift-click toggle, or drag a box to select several hexes
   D = { type: 'box', sx: wx, sy: wy, ex: wx, ey: wy, shift: e.shiftKey, k: inGrid(c, r) ? key(c, r) : null, moved: false };
@@ -461,7 +466,7 @@ function boxUp(d) {
 function select(sel) {
   const same = JSON.stringify(sel) === JSON.stringify(S.sel);
   S.sel = sel; renderOverlay(); if (!same) renderProps();
-  $('#stSel').textContent = sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'hexes' ? sel.keys.length + ' hexes selected' : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
+  $('#stSel').textContent = sel && sel.kind === 'link' ? 'Link selected' : sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'hexes' ? sel.keys.length + ' hexes selected' : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
 }
 
 // ----- stamp tool

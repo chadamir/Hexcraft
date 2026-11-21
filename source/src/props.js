@@ -62,6 +62,7 @@ function renderProps() {
     else if (s.kind === 'hex') html = hexPanel(s.k);
     else if (s.kind === 'obj') { const o = P.objects.find((x) => x.id === s.id); html = o ? objPanel(o) : mapPanel(); }
     else if (s.kind === 'type') { const t = (P.types || []).find((x) => x.id === s.id); html = t ? typePanel(t) : mapPanel(); }
+    else if (s.kind === 'link') { const l = (P.links || []).find((x) => x.id === s.id); html = l ? linkPanel(l) : mapPanel(); }
   } catch (err) { console.error(err); html = `<div class="sec">Panel error: ${esc(err.message)}</div>`; }
   propsEl.innerHTML = html;
   wireProps();
@@ -155,6 +156,15 @@ handlers.bgRemove = () => { checkpoint(); const ref = P.bgImage.ref; P.bgImage =
 handlers.delAsset = (d) => confirmBox('Delete upload', 'Remove this icon? Hexes and objects using it will lose it.', 'Delete', () => { checkpoint(); deleteAsset(d.id); });
 handlers.uploadIcon = () => uploadIconsDialog();
 
+// company homes / destinations and link ends follow their hexes when rows or columns move
+function remapHexRefs(mk) {
+  (P.companies || []).forEach((co) => { if (co.home) { const [hk, i, sl] = co.home.split('|'); co.home = `${mk(hk)}|${i}|${sl}`; } if (co.dest) co.dest = mk(co.dest); });
+  remapLinkHexes(mk);
+}
+function dropHexRefs(pred) {
+  (P.companies || []).forEach((co) => { if (co.home) { const [c, r] = unkey(co.home.split('|')[0]); if (pred(c, r)) co.home = ''; } if (co.dest) { const [c, r] = unkey(co.dest); if (pred(c, r)) co.dest = ''; } });
+  dropLinksAt(pred);
+}
 function extendGrid(side, n, raw) {
   const g = P.grid; const s = R();
   if ((side === 'top' || side === 'bottom') && g.rows + n < 1) return;
@@ -170,6 +180,7 @@ function extendGrid(side, n, raw) {
     P.hexes = remap(P.hexes); P.voids = remap(P.voids);
     const ne = {}; for (const k in P.edges) { const [c, r, i] = k.split(',').map(Number); ne[(c + dc) + ',' + (r + dr) + ',' + i] = P.edges[k]; } P.edges = ne;
     P.objects.forEach((o) => { o.x += dx; o.y += dy; });
+    remapHexRefs((k) => { const [c, r] = unkey(k); return key(c + dc, r + dr); });
     if (P.bgImage) { P.bgImage.x += dx; P.bgImage.y += dy; }
     S.view.x -= dx * S.view.z; S.view.y -= dy * S.view.z; applyView();
   }
@@ -177,6 +188,7 @@ function extendGrid(side, n, raw) {
   for (const k in P.hexes) { const [c, r] = unkey(k); if (!inGrid(c, r)) delete P.hexes[k]; }
   for (const k in P.voids) { const [c, r] = unkey(k); if (!inGrid(c, r)) delete P.voids[k]; }
   for (const k in P.edges) { const { c, r } = edgeFromKey(k); if (c < -1 || r < -1 || c > g.cols || r > g.rows) delete P.edges[k]; }
+  dropHexRefs((c, r) => !inGrid(c, r));
   if (raw) return;
   if (S.sel && S.sel.kind === 'hex') S.sel = null;
   renderAll(); renderProps();
@@ -532,7 +544,7 @@ function shiftLines(axis, index, n, opts = {}) {
   // remap data
   const nh = {}; for (const k in P.hexes) nh[mk(k)] = P.hexes[k]; P.hexes = nh;
   const ne = {}; for (const k in P.edges) { const [c, r, i] = k.split(',').map(Number); const nk = mk(key(c, r)); ne[nk + ',' + i] = P.edges[k]; } P.edges = ne;
-  (P.companies || []).forEach((co) => { if (co.home) { const [hk, i, sl] = co.home.split('|'); co.home = `${mk(hk)}|${i}|${sl}`; } if (co.dest) co.dest = mk(co.dest); });
+  remapHexRefs(mk);
   const newPresent = new Set([...oldPresent].map(mk));
   // grid size
   if (axis === 'row') g.rows += n; else g.cols += n;
@@ -572,7 +584,7 @@ function deleteLine(axis, index, n = 1) {
   const inLine = (c, r) => { const t = axis === 'row' ? r : c; return t >= index && t < index + n; };
   for (const k in P.hexes) { const [c, r] = unkey(k); if (inLine(c, r)) delete P.hexes[k]; }
   for (const k in P.edges) { const [c, r] = k.split(',').map(Number); if (inLine(c, r)) delete P.edges[k]; }
-  (P.companies || []).forEach((co) => { if (co.home) { const [c, r] = unkey(co.home.split('|')[0]); if (inLine(c, r)) co.home = ''; } if (co.dest) { const [c, r] = unkey(co.dest); if (inLine(c, r)) co.dest = ''; } });
+  dropHexRefs(inLine);
   for (let j = index; j < index + n; j++) for (let t = 0; t < (axis === 'row' ? g.cols : g.rows); t++) P.voids[axis === 'row' ? key(t, j) : key(j, t)] = 1;
   shiftLines(axis, index + n, -n);
   const rowEmpty = (r) => { for (let c = 0; c < P.grid.cols; c++) if (!P.voids[key(c, r)]) return false; return true; };

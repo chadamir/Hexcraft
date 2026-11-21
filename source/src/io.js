@@ -154,7 +154,8 @@ const Cloud = {
 // ---------------- Save / autosave ----------------
 S.cloudLinked = false; S.lastSaved = 0; S.saving = false;
 let _autoT = 0, _cloudT = 0;
-function fullJSON() { return JSON.stringify(P); }
+// P.page records the page area the editor measured, so the Node renderer draws the same page
+function fullJSON() { try { P.page = pageRound(contentBounds(true)); } catch (e) {} return JSON.stringify(P); }
 function scheduleAutosave() {
   clearTimeout(_autoT); _autoT = setTimeout(autosaveLocal, 1200);
   if (S.cloudLinked && Cloud.ready) { clearTimeout(_cloudT); _cloudT = setTimeout(() => doSave({ silent: true }), 8000); }
@@ -205,18 +206,7 @@ async function doSave(opts = {}) {
   }
   S.saving = false; updateSaveState();
 }
-function migrate(obj) {
-  const d = defaultProject();
-  const p = Object.assign(d, obj);
-  p.grid = Object.assign(defaultProject().grid, obj.grid || {});
-  p.style = Object.assign(defaultProject().style, obj.style || {});
-  p.hexes = p.hexes || {}; for (const k in p.hexes) { const h = p.hexes[k]; h.items = h.items || []; h.track = h.track || []; }
-  p.voids = p.voids || {}; p.edges = p.edges || {}; p.objects = p.objects || []; p.assets = p.assets || {}; p.types = p.types || []; p.palette = p.palette && p.palette.length ? p.palette : [...DEFAULT_PALETTE];
-  p.companies = (p.companies || []).map((c) => { const d = newCompanyShape(); return Object.assign(d, c, { logo: Object.assign(d.logo, c.logo || {}), shares: Object.assign(d.shares, c.shares || {}), tokens: Object.assign(d.tokens, c.tokens || {}) }); });
-  p.compStyle = Object.assign(defaultCompStyle(), p.compStyle || {});
-  return p;
-}
-function newCompanyShape() { const keep = P; try { P = P || { companies: [] }; return newCompany(0); } finally { P = keep; } }
+// migrate() lives in core.js (the Node renderer uses it too)
 function loadProject(json, opts = {}) {
   let obj; try { obj = typeof json === 'string' ? JSON.parse(json) : json; } catch (e) { toast('That file is not a valid map project.', true); return false; }
   if (typeof isMakerGame === 'function' && isMakerGame(obj)) {
@@ -356,24 +346,10 @@ function newDialog() {
 }
 
 // ---------------- Export ----------------
-function buildExportSVG(o = {}) {
-  const b = o.bounds || contentBounds(true); const view = o.view || b;
-  const pxW = o.pxW || view.w, pxH = o.pxH || view.h, pdf = !!o.pdf;
-  let s = `<svg xmlns="${SVGNS}" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="${n2(pxW)}" height="${n2(pxH)}" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}">`;
-  s += `<title>${esc(P.name)}</title>`;
-  if (o.bg !== false) s += `<rect x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" fill="${P.style.bg}"/>`;
-  s += bgImageStr({ export: true, pdf });
-  s += P.objects.filter((ob) => ob.t === 'region' && ob.under).map((ob) => objectStr(ob, { pdf })).join('');
-  const clip = clipOn(); if (clip) s += `<defs>${clipDefStr('mapclipx')}</defs><g clip-path="url(#mapclipx)">`;
-  s += baseFillStr();
-  let fills = '', contents = '';
-  for (const k in P.hexes) { const [c, r] = unkey(k); if (P.voids[k] || !inGrid(c, r)) continue; const h = P.hexes[k]; fills += hexFillStr(c, r, h, { pdf, idp: 'x' }); contents += hexContentStr(c, r, h, { pdf }); }
-  s += fills + gridStr() + edgesStr() + contents;
-  if (clip) s += '</g>' + frameStr();
-  s += coordsStr();
-  s += P.objects.filter((ob) => !(ob.t === 'region' && ob.under)).map((ob) => objectStr(ob, { pdf })).join('');
-  return s + '</svg>';
-}
+// The editor measures the real page area; everything else is drawn by mapSVG() in core.js.
+function buildExportSVG(o = {}) { return mapSVG(Object.assign({}, o, { bounds: o.bounds || contentBounds(true) })); }
+const exArt = () => (EX.art ? { sides: EX.artSides, track: EX.artTrack, links: EX.artLinks } : null);
+const pageRound = (b) => ({ x: Math.round(b.x * 100) / 100, y: Math.round(b.y * 100) / 100, w: Math.round(b.w * 100) / 100, h: Math.round(b.h * 100) / 100 });
 async function svgToCanvas(svg, w, h) {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   try {
@@ -383,7 +359,7 @@ async function svgToCanvas(svg, w, h) {
 }
 const canvasToBlob = (cv) => new Promise((res) => cv.toBlob(res, 'image/png'));
 const PAPERS = { letter: ['Letter', 215.9, 279.4], legal: ['Legal', 215.9, 355.6], tabloid: ['Tabloid 11×17', 279.4, 431.8], a4: ['A4', 210, 297], a3: ['A3', 297, 420], a2: ['A2', 420, 594], a1: ['A1', 594, 841], a0: ['A0', 841, 1189] };
-const EX = { fmt: 'png', bg: true, scale: 2, pdfMode: 'tile', hexMM: 38.1, paper: 'letter', orient: 'auto', margin: 8, overlap: 10 };
+const EX = { art: false, artSides: true, artTrack: false, artLinks: false, fmt: 'png', bg: true, scale: 2, pdfMode: 'tile', hexMM: 38.1, paper: 'letter', orient: 'auto', margin: 8, overlap: 10 };
 function exportDialog() {
   closeMenus();
   const b = contentBounds(true);
@@ -406,6 +382,9 @@ function exportDialog() {
       if (EX.pdfMode === 'page') info = `Scaled to fit one ${PAPERS[EX.paper][0]} sheet`;
     }
     return `<div class="tabs" id="exFmt">${['png', 'svg', 'pdf'].map((f) => `<button data-v="${f}" class="${EX.fmt === f ? 'on' : ''}">${f.toUpperCase()}</button>`).join('')}</div>
+      <div class="f"><label>Content</label><div class="seg" id="exArt"><button data-v="0" class="${EX.art ? '' : 'on'}">Full map</button><button data-v="1" class="${EX.art ? 'on' : ''}">Art only</button></div></div>
+      ${EX.art ? `<div class="help" style="margin-top:0">Just the picture — terrain colours, hex images, icons, regions, background and map edge — with no grid lines, cities, towns, text, coordinates, markets or tables. Same page coordinates as a full export and as <b>Export game data</b>, so a program can use it as a board background.</div>
+        <label class="chk"><input type="checkbox" id="exArtSides" ${EX.artSides ? 'checked' : ''}>Rivers &amp; coasts</label><label class="chk"><input type="checkbox" id="exArtTrack" ${EX.artTrack ? 'checked' : ''}>Pre-printed track</label><label class="chk"><input type="checkbox" id="exArtLinks" ${EX.artLinks ? 'checked' : ''}>Point-to-point links</label>` : ''}
       ${opts}<label class="chk"><input type="checkbox" id="exBg" ${EX.bg ? 'checked' : ''}>Include background color${EX.fmt === 'png' ? ' (off = transparent)' : ''}</label>
       <div class="card" style="font:12.5px var(--mono);color:var(--ink2)">${info}</div>
       <div class="help">Exports include everything inside the page area (map, coordinates, markets, tables, text). Removed hexes and editing outlines are left out.</div>`;
@@ -419,6 +398,8 @@ function exportDialog() {
     on('exHex', 'hexMM'); on('exMargin', 'margin'); on('exOverlap', 'overlap');
     const p = $('#exPaper'); if (p) p.onchange = () => { EX.paper = p.value; refresh(); };
     $('#exBg').onchange = (e) => (EX.bg = e.target.checked);
+    $$('#exArt button').forEach((x) => (x.onclick = () => { EX.art = x.dataset.v === '1'; refresh(); }));
+    [['exArtSides', 'artSides'], ['exArtTrack', 'artTrack'], ['exArtLinks', 'artLinks']].forEach(([id, k]) => { const el = $('#' + id); if (el) el.onchange = () => (EX[k] = el.checked); });
   };
   const refresh = () => { $('#modalBody').innerHTML = body(); wire(); };
   openModal('Export map', body(), [{ label: 'Cancel', onClick: closeModal }, { label: 'Export', cls: 'pri', onClick: () => { closeModal(); runExport(); } }]);
@@ -437,15 +418,15 @@ function tileLayout(b) {
   return best;
 }
 async function runExport() {
-  const base = slug(P.name); select(S.sel);
+  const base = slug(P.name) + (EX.art ? '-art' : ''); select(S.sel);
   try {
-    if (EX.fmt === 'svg') { await saveBlob(base + '.svg', buildExportSVG({ bg: EX.bg }), 'image/svg+xml'); return; }
+    if (EX.fmt === 'svg') { await saveBlob(base + '.svg', buildExportSVG({ bg: EX.bg, art: exArt() }), 'image/svg+xml'); return; }
     if (EX.fmt === 'png') {
       busy(true, 'Rendering PNG…'); const b = contentBounds(true);
       let sc = EX.scale; const maxSide = 16000, maxArea = 160e6;
       while (sc > 0.25 && (b.w * sc > maxSide || b.h * sc > maxSide || b.w * b.h * sc * sc > maxArea)) sc *= 0.8;
       const w = Math.round(b.w * sc), h = Math.round(b.h * sc);
-      const cv = await svgToCanvas(buildExportSVG({ bg: EX.bg, pxW: w, pxH: h }), w, h);
+      const cv = await svgToCanvas(buildExportSVG({ bg: EX.bg, art: exArt(), pxW: w, pxH: h }), w, h);
       const blob = await canvasToBlob(cv); busy(false);
       if (!blob) { toast('This map is too large for a PNG in this browser. Try a smaller resolution or SVG/PDF.', true); return; }
       if (sc < EX.scale) toast(`Map is very large — PNG was reduced to ${w.toLocaleString()} × ${h.toLocaleString()} px.`);
@@ -471,14 +452,14 @@ async function buildPDF() {
     const pxPerMM = (SQ3 * R()) / EX.hexMM; let wPt = (b.w / pxPerMM) * PT, hPt = (b.h / pxPerMM) * PT;
     const lim = 14400; if (wPt > lim || hPt > lim) { const k = lim / Math.max(wPt, hPt); wPt *= k; hPt *= k; toast('Map is larger than the PDF page limit (200 in) — it was scaled down to fit.'); }
     doc = new jsPDF({ unit: 'pt', format: [wPt, hPt], orientation: wPt > hPt ? 'l' : 'p', compress: true });
-    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, pxW: wPt, pxH: hPt }), 0, 0, wPt, hPt);
+    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, pxW: wPt, pxH: hPt }), 0, 0, wPt, hPt);
   } else if (EX.pdfMode === 'page') {
     const [, pw0, ph0] = PAPERS[EX.paper]; let pw = pw0, ph = ph0;
     if (EX.orient === 'l' || (EX.orient === 'auto' && b.w > b.h)) { pw = ph0; ph = pw0; }
     const aw = (pw - 2 * EX.margin) * PT, ah = (ph - 2 * EX.margin) * PT; const k = Math.min(aw / b.w, ah / b.h);
     const w = b.w * k, h = b.h * k;
     doc = new jsPDF({ unit: 'pt', format: [pw * PT, ph * PT], orientation: pw > ph ? 'l' : 'p', compress: true });
-    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, pxW: w, pxH: h }), (pw * PT - w) / 2, (ph * PT - h) / 2, w, h);
+    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, pxW: w, pxH: h }), (pw * PT - w) / 2, (ph * PT - h) / 2, w, h);
   } else {
     const t = tileLayout(b); const pxmm = t.pxPerMM;
     doc = new jsPDF({ unit: 'pt', format: [t.pw * PT, t.ph * PT], orientation: t.pw > t.ph ? 'l' : 'p', compress: true });
@@ -487,7 +468,7 @@ async function buildPDF() {
       if (!first) doc.addPage([t.pw * PT, t.ph * PT], t.pw > t.ph ? 'l' : 'p'); first = false;
       busy(true, `Building PDF… sheet ${j * t.nx + i + 1} of ${total}`);
       const view = { x: b.x + i * t.st * pxmm, y: b.y + j * t.sh * pxmm, w: t.aw * pxmm, h: t.ah * pxmm };
-      await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, bounds: b, view, pxW: t.aw * PT, pxH: t.ah * PT }), EX.margin * PT, EX.margin * PT, t.aw * PT, t.ah * PT);
+      await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, bounds: b, view, pxW: t.aw * PT, pxH: t.ah * PT }), EX.margin * PT, EX.margin * PT, t.aw * PT, t.ah * PT);
       // trim guides + label
       doc.setDrawColor(150); doc.setLineWidth(0.4);
       const m = EX.margin * PT, x1 = m + t.aw * PT, y1 = m + t.ah * PT, L2 = Math.min(10, m * 0.8);
@@ -565,6 +546,7 @@ const ACTS = {
   new: newDialog, open: openDialog, save: () => doSave(), saveas: saveAsCopy,
   savefile: () => saveBlob(slug(P.name) + '.hexmap.json', fullJSON(), 'application/json'),
   'gamedata-export': () => exportGameData(),
+  'gamedata-check': () => toggleGameDataCheck(),
   openfile: openFileFlow,
   'maker-import': () => pickFiles('.json,application/json', false, async (files) => { const txt = await readText(files[0]); loadProject(txt, { cloud: false }); }),
   'maker-export': () => { try { const g = exportMaker(); saveBlob(slug(P.name) + '.18xxmaker.json', JSON.stringify(g, null, 2), 'application/json'); } catch (e) { console.error(e); toast('18xx Maker export failed: ' + e.message, true); } },

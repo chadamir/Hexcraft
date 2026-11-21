@@ -294,4 +294,7 @@ function fixHomesOnItemChange(k, mapIdx) {
     if (!co.home) return; const [hk, i, sl] = co.home.split('|'); if (hk !== k) return;
     const ni = mapIdx(+i); co.home = ni == null ? '' : `${hk}|${ni}|${sl}`;
   });
+  if (typeof remapLinkItems === 'function') remapLinkItems(k, mapIdx);
 }
+
+function newCompanyShape() { const keep = P; try { P = P || { companies: [] }; return newCompany(0); } finally { P = keep; } }

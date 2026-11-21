@@ -20,13 +20,17 @@ const uid = (p = '') => p + Math.random().toString(36).slice(2, 9) + Date.now().
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n2 = (v) => (Math.round(v * 100) / 100).toString();
+// "coal, port , start" -> ['coal', 'port', 'start']
+const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
+// every number in a string: "20/30/40" -> [20, 30, 40]; "$60" -> [60]
+const numbersIn = (s) => (String(s ?? '').match(/-?\d+(\.\d+)?/g) || []).map(Number);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 let P = null; // the project
 
 function defaultProject() {
   return {
-    app: 'hexcraft', v: 1, id: uid('m'), name: 'Untitled map',
+    app: 'hexcraft', v: 1, id: uid('m'), name: 'Untitled map', links: [],
     grid: { cols: 14, rows: 10, size: 40, orient: 'pointy', stagger: 'odd' },
     style: {
       bg: '#f4efe2', hexFill: '#ece4cc', hexOpacity: 1, gridColor: '#6d6455', gridWidth: 1.2,
@@ -162,10 +166,13 @@ function coordLabel(c, r) {
 }
 
 // ---------------- Text measurement ----------------
-const _mctx = document.createElement('canvas').getContext('2d');
+// In a browser the canvas measures exactly; without one (the Node renderer) widths are estimated per character.
+const _mctx = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas').getContext('2d') : null;
+const _CW = { narrow: 'fijlrtI.,:;!|\'`()[]{} ', wide: 'mwMW@%&' };
 function measure(text, fs, bold, fam = 'sans', italic = false) {
-  _mctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fs}px ${FONTS[fam] || FONTS.sans}`;
-  return _mctx.measureText(String(text)).width;
+  if (_mctx) { _mctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fs}px ${FONTS[fam] || FONTS.sans}`; return _mctx.measureText(String(text)).width; }
+  let w = 0; for (const ch of String(text)) w += _CW.narrow.includes(ch) ? 0.3 : _CW.wide.includes(ch) ? 0.85 : ch >= 'A' && ch <= 'Z' ? 0.66 : ch >= '0' && ch <= '9' ? 0.56 : 0.52;
+  return w * fs * (bold ? 1.06 : 1) * (fam === 'mono' ? 1.15 : 1);
 }
 function textEl(x, y, str, o = {}) {
   const fs = o.fs || 12, fam = FONTS[o.fam || 'sans'] || FONTS.sans;
@@ -830,4 +837,143 @@ function bgImageStr(opt = {}) {
   if (opt.export && b.exp === false) return '';
   return `<g${b.opacity != null && b.opacity < 1 ? ` opacity="${b.opacity}"` : ''}>` +
     `<image x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" preserveAspectRatio="none" xlink:href="${assetHref(b.ref, opt.pdf)}"/></g>`;
+}
+
+
+// =====================================================================
+//  Whole map as one SVG string — no DOM needed (used by every export
+//  and by the Node renderer, render/hexcraft-render.cjs).
+//  o.bounds  page area {x,y,w,h} (the viewBox; page units = map units)
+//  o.view    part of the page to draw (tiled PDF pages); default bounds
+//  o.pxW/H   output size;  o.bg false = transparent;  o.pdf = PDF-safe images
+//  o.art     picture only: terrain colours, hex images, icons, regions,
+//            background, map edge — no grid lines, cities, towns, text,
+//            coordinates, markets or tables. { sides: rivers & coasts
+//            (default true), track: pre-printed track (default false),
+//            links: point-to-point links (default false) }
+// =====================================================================
+const ART_SIDES = ['river', 'water'];
+function artOpts(a) { return a ? Object.assign({ sides: true, track: false, links: false }, a === true ? {} : a) : null; }
+function hexArtStr(c, r, h, o, art) {
+  if (!h) return '';
+  const ty = hexType(h); let s = '';
+  const pics = (list, to) => (list || []).forEach((it, i) => { if (it.t === 'icon' || it.t === 'img') s += itemStr(c, r, it, i, to); });
+  pics(ty && ty.items, Object.assign({}, o, { typeItem: true }));
+  pics(h.items, o);
+  if (art.track) (h.track || []).forEach((t) => (s += trackStr(c, r, h, t)));
+  return s;
+}
+function mapSVG(o = {}) {
+  const art = artOpts(o.art);
+  const b = o.bounds || pageBounds(); const view = o.view || b;
+  const pxW = o.pxW || view.w, pxH = o.pxH || view.h, pdf = !!o.pdf;
+  let s = `<svg xmlns="${SVGNS}" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="${n2(pxW)}" height="${n2(pxH)}" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}">`;
+  s += `<title>${esc(P.name)}${art ? ' (art)' : ''}</title>`;
+  if (o.bg !== false) s += `<rect x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" fill="${P.style.bg}"/>`;
+  s += bgImageStr({ export: true, pdf });
+  const objs = P.objects || [];
+  s += objs.filter((ob) => ob.t === 'region' && ob.under).map((ob) => objectStr(ob, { pdf })).join('');
+  const clip = clipOn(); if (clip) s += `<defs>${clipDefStr('mapclipx')}</defs><g clip-path="url(#mapclipx)">`;
+  s += baseFillStr();
+  let fills = '', contents = '';
+  for (const k in P.hexes) {
+    const [c, r] = unkey(k); if (P.voids[k] || !inGrid(c, r)) continue; const h = P.hexes[k];
+    let f = hexFillStr(c, r, h, { pdf, idp: 'x' });
+    // without grid lines, close the hairline gaps browsers leave between neighbouring fills
+    if (art && !(P.style.hexOpacity < 1)) f = f.replace(/<path d="([^"]+)" fill="([^"]+)"\/>/, '<path d="$1" fill="$2" stroke="$2" stroke-width="0.8" stroke-linejoin="round"/>');
+    fills += f;
+    contents += art ? hexArtStr(c, r, h, { pdf }, art) : hexContentStr(c, r, h, { pdf });
+  }
+  const lk = !art || art.links ? linksStr({ art: !!art }) : '';
+  if (art) {
+    let e = ''; if (art.sides) for (const k in P.edges) if (ART_SIDES.includes(P.edges[k].t)) e += edgeStr(k, Object.assign({}, P.edges[k], { label: '' }));
+    s += fills + e + lk + contents;
+  } else s += fills + gridStr() + edgesStr() + lk + contents;
+  if (clip) s += '</g>' + frameStr();
+  if (!art) s += coordsStr();
+  const over = objs.filter((ob) => !(ob.t === 'region' && ob.under) && (!art || ['region', 'icon', 'img'].includes(ob.t)));
+  s += over.map((ob) => objectStr(ob, { pdf })).join('');
+  return s + '</svg>';
+}
+// Page area without measuring the DOM: the area last measured by the editor (saved in P.page), else an estimate.
+function pageBounds() {
+  if (P.page && P.page.w > 0 && P.page.h > 0) return { ...P.page };
+  let b = clipOn() ? clipRect() : hexBoundsExisting();
+  const add = (x0, y0, x1, y1) => { const X0 = Math.min(b.x, x0), Y0 = Math.min(b.y, y0); b = { x: X0, y: Y0, w: Math.max(b.x + b.w, x1) - X0, h: Math.max(b.y + b.h, y1) - Y0 }; };
+  const cb = coordsBounds(); if (cb) add(cb.x, cb.y, cb.x + cb.w, cb.y + cb.h);
+  const bi = P.bgImage; if (bi && P.assets && P.assets[bi.ref] && bi.exp !== false) add(bi.x, bi.y, bi.x + bi.w, bi.y + bi.h);
+  (P.objects || []).forEach((ob) => {
+    if (ob.t === 'region' && ob.pts) ob.pts.forEach(([px, py]) => add(ob.x + px, ob.y + py, ob.x + px, ob.y + py));
+    else if (ob.t === 'icon') add(ob.x, ob.y, ob.x + (ob.size || 60), ob.y + (ob.size || 60));
+    else if (ob.t === 'img') { const w = ob.w || 200, h = ob.h || w / assetAspect(ob.ref); add(ob.x, ob.y, ob.x + w, ob.y + h); }
+    else add(ob.x, ob.y, ob.x + 1, ob.y + 1);
+  });
+  const pad = P.style.pad ?? 40;
+  return { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad };
+}
+
+// =====================================================================
+//  Point-to-point links between cities, towns or hexes (Link tool L).
+//  P.links = [{ id, a: {k:'c,r', i: item index in the hex's own items or null = hex centre}, b,
+//               cost, length, color, w, style: solid|dashed|rail|double, bend (-1…1),
+//               show: cost|length|both|none, tags }]
+// =====================================================================
+const LINK_STYLES = [['solid', 'Solid'], ['dashed', 'Dashed'], ['rail', 'Railroad'], ['double', 'Double']];
+function linkOk(l) { if (!l || !l.a || !l.b) return false; const [c1, r1] = unkey(l.a.k), [c2, r2] = unkey(l.b.k); return exists(c1, r1) && exists(c2, r2); }
+function linkItem(e) { const h = P.hexes[e.k]; return h && e.i != null ? (h.items || [])[e.i] || null : null; }
+function linkEnd(e) { const [c, r] = unkey(e.k), it = linkItem(e); const [x, y] = it ? itemPos(c, r, it) : center(c, r); return { x, y, it }; }
+// hex steps between two hexes (straight-line distance on the grid)
+function hexSteps(k1, k2) {
+  const [x1, y1] = center(...unkey(k1)), [x2, y2] = center(...unkey(k2)), s = R(), dx = x2 - x1, dy = y2 - y1;
+  let q, r;
+  if (isPointy()) { q = ((SQ3 / 3) * dx - dy / 3) / s; r = ((2 / 3) * dy) / s; } else { q = ((2 / 3) * dx) / s; r = (-dx / 3 + (SQ3 / 3) * dy) / s; }
+  q = Math.round(q); r = Math.round(r); return (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+}
+function linkLength(l) { const n = numbersIn(l.length); return n.length ? n[0] : hexSteps(l.a.k, l.b.k); }
+function linkGeom(l) {
+  const p0 = linkEnd(l.a), p1 = linkEnd(l.b), dx = p1.x - p0.x, dy = p1.y - p0.y, len = Math.hypot(dx, dy) || 1, b = +l.bend || 0;
+  const cx = (p0.x + p1.x) / 2 - dy * b * 0.5, cy = (p0.y + p1.y) / 2 + dx * b * 0.5;
+  const d = b ? `M${n2(p0.x)} ${n2(p0.y)}Q${n2(cx)} ${n2(cy)} ${n2(p1.x)} ${n2(p1.y)}` : `M${n2(p0.x)} ${n2(p0.y)}L${n2(p1.x)} ${n2(p1.y)}`;
+  return { p0, p1, d, len, mid: [0.25 * p0.x + 0.5 * cx + 0.25 * p1.x, 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y] };
+}
+function linkLabelText(l) {
+  const show = l.show || 'cost', cost = String(l.cost ?? '').trim(), len = String(linkLength(l));
+  if (show === 'none') return ''; if (show === 'length') return len; if (show === 'both') return cost ? `${cost} · ${len}` : len;
+  return cost;
+}
+function linkStr(l, o = {}) {
+  const g = linkGeom(l), s = R(), w = (l.w || 1) * s * 0.09, col = l.color || '#3a332a', st = l.style || 'solid';
+  const P_ = (attrs) => `<path d="${g.d}" fill="none"${attrs.includes('stroke-linecap') ? '' : ' stroke-linecap="round"'} ${attrs}/>`;
+  let out = P_(`stroke="#ffffff" stroke-opacity=".85" stroke-width="${n2(w * (st === 'rail' ? 3.6 : st === 'double' ? 3.4 : 2.2))}"`);
+  if (st === 'dashed') out += P_(`stroke="${col}" stroke-width="${n2(w)}" stroke-dasharray="${n2(w * 3)} ${n2(w * 2)}"`);
+  else if (st === 'rail') out += P_(`stroke="${col}" stroke-width="${n2(w * 2.8)}" stroke-linecap="butt" stroke-dasharray="${n2(w * 0.7)} ${n2(w * 1.8)}"`) + P_(`stroke="${col}" stroke-width="${n2(w * 0.8)}"`);
+  else if (st === 'double') out += P_(`stroke="${col}" stroke-width="${n2(w * 2.6)}"`) + P_(`stroke="#ffffff" stroke-width="${n2(w)}"`);
+  else out += P_(`stroke="${col}" stroke-width="${n2(w)}"`);
+  const txt = o.art ? '' : linkLabelText(l);
+  if (txt) {
+    const fs = s * 0.26 * (l.ls || 1), tw = measure(txt, fs, true) + fs * 0.7, th = fs * 1.35, [mx, my] = g.mid;
+    out += `<rect x="${n2(mx - tw / 2)}" y="${n2(my - th / 2)}" width="${n2(tw)}" height="${n2(th)}" rx="${n2(th / 2)}" fill="#ffffff" stroke="${col}" stroke-width="${n2(Math.max(0.6, w * 0.45))}"/>` +
+      textEl(mx, my + fs * 0.35, txt, { fs, bold: true, anchor: 'middle', fill: '#111' });
+  }
+  return out;
+}
+function linksStr(o = {}) {
+  return (P.links || []).filter(linkOk).map((l) => {
+    if (!o.editor) return linkStr(l, o);
+    const g = linkGeom(l), w = (l.w || 1) * R() * 0.09;
+    return `<g data-link="${l.id}" style="cursor:pointer"><path d="${g.d}" fill="none" stroke="transparent" stroke-width="${n2(Math.max(w * 5, R() * 0.3))}"/>${linkStr(l, o)}</g>`;
+  }).join('');
+}
+
+// ---------------- Project files: fill in anything an older file lacks ----------------
+function migrate(obj) {
+  const d = defaultProject();
+  const p = Object.assign(d, obj);
+  p.grid = Object.assign(defaultProject().grid, obj.grid || {});
+  p.style = Object.assign(defaultProject().style, obj.style || {});
+  p.hexes = p.hexes || {}; for (const k in p.hexes) { const h = p.hexes[k]; h.items = h.items || []; h.track = h.track || []; }
+  p.voids = p.voids || {}; p.edges = p.edges || {}; p.objects = p.objects || []; p.links = p.links || []; p.assets = p.assets || {}; p.types = p.types || []; p.palette = p.palette && p.palette.length ? p.palette : [...DEFAULT_PALETTE];
+  p.companies = (p.companies || []).map((c) => { const d = newCompanyShape(); return Object.assign(d, c, { logo: Object.assign(d.logo, c.logo || {}), shares: Object.assign(d.shares, c.shares || {}), tokens: Object.assign(d.tokens, c.tokens || {}) }); });
+  p.compStyle = Object.assign(defaultCompStyle(), p.compStyle || {});
+  return p;
 }

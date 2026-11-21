@@ -215,6 +215,7 @@ input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
         <button data-act="maker-export">Export for 18xx Maker (.json)</button>
         <hr>
         <button data-act="gamedata-export">Export game data (.json)</button>
+        <button data-act="gamedata-check" id="gdCheckBtn">Check game data on the map</button>
       </div>
     </div>
     <div class="menu" id="insertMenu">
@@ -294,6 +295,7 @@ input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
           <g id="L-fills"></g>
           <g id="L-grid"></g>
           <g id="L-edges"></g>
+          <g id="L-links"></g>
           <g id="L-content"></g>
         </g>
         <g id="L-frame"></g>
@@ -923,13 +925,17 @@ const uid = (p = '') => p + Math.random().toString(36).slice(2, 9) + Date.now().
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n2 = (v) => (Math.round(v * 100) / 100).toString();
+// "coal, port , start" -> ['coal', 'port', 'start']
+const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
+// every number in a string: "20/30/40" -> [20, 30, 40]; "$60" -> [60]
+const numbersIn = (s) => (String(s ?? '').match(/-?\d+(\.\d+)?/g) || []).map(Number);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 let P = null; // the project
 
 function defaultProject() {
   return {
-    app: 'hexcraft', v: 1, id: uid('m'), name: 'Untitled map',
+    app: 'hexcraft', v: 1, id: uid('m'), name: 'Untitled map', links: [],
     grid: { cols: 14, rows: 10, size: 40, orient: 'pointy', stagger: 'odd' },
     style: {
       bg: '#f4efe2', hexFill: '#ece4cc', hexOpacity: 1, gridColor: '#6d6455', gridWidth: 1.2,
@@ -1065,10 +1071,13 @@ function coordLabel(c, r) {
 }
 
 // ---------------- Text measurement ----------------
-const _mctx = document.createElement('canvas').getContext('2d');
+// In a browser the canvas measures exactly; without one (the Node renderer) widths are estimated per character.
+const _mctx = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas').getContext('2d') : null;
+const _CW = { narrow: 'fijlrtI.,:;!|\'`()[]{} ', wide: 'mwMW@%&' };
 function measure(text, fs, bold, fam = 'sans', italic = false) {
-  _mctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fs}px ${FONTS[fam] || FONTS.sans}`;
-  return _mctx.measureText(String(text)).width;
+  if (_mctx) { _mctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fs}px ${FONTS[fam] || FONTS.sans}`; return _mctx.measureText(String(text)).width; }
+  let w = 0; for (const ch of String(text)) w += _CW.narrow.includes(ch) ? 0.3 : _CW.wide.includes(ch) ? 0.85 : ch >= 'A' && ch <= 'Z' ? 0.66 : ch >= '0' && ch <= '9' ? 0.56 : 0.52;
+  return w * fs * (bold ? 1.06 : 1) * (fam === 'mono' ? 1.15 : 1);
 }
 function textEl(x, y, str, o = {}) {
   const fs = o.fs || 12, fam = FONTS[o.fam || 'sans'] || FONTS.sans;
@@ -1735,6 +1744,145 @@ function bgImageStr(opt = {}) {
     `<image x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" preserveAspectRatio="none" xlink:href="${assetHref(b.ref, opt.pdf)}"/></g>`;
 }
 
+
+// =====================================================================
+//  Whole map as one SVG string — no DOM needed (used by every export
+//  and by the Node renderer, render/hexcraft-render.cjs).
+//  o.bounds  page area {x,y,w,h} (the viewBox; page units = map units)
+//  o.view    part of the page to draw (tiled PDF pages); default bounds
+//  o.pxW/H   output size;  o.bg false = transparent;  o.pdf = PDF-safe images
+//  o.art     picture only: terrain colours, hex images, icons, regions,
+//            background, map edge — no grid lines, cities, towns, text,
+//            coordinates, markets or tables. { sides: rivers & coasts
+//            (default true), track: pre-printed track (default false),
+//            links: point-to-point links (default false) }
+// =====================================================================
+const ART_SIDES = ['river', 'water'];
+function artOpts(a) { return a ? Object.assign({ sides: true, track: false, links: false }, a === true ? {} : a) : null; }
+function hexArtStr(c, r, h, o, art) {
+  if (!h) return '';
+  const ty = hexType(h); let s = '';
+  const pics = (list, to) => (list || []).forEach((it, i) => { if (it.t === 'icon' || it.t === 'img') s += itemStr(c, r, it, i, to); });
+  pics(ty && ty.items, Object.assign({}, o, { typeItem: true }));
+  pics(h.items, o);
+  if (art.track) (h.track || []).forEach((t) => (s += trackStr(c, r, h, t)));
+  return s;
+}
+function mapSVG(o = {}) {
+  const art = artOpts(o.art);
+  const b = o.bounds || pageBounds(); const view = o.view || b;
+  const pxW = o.pxW || view.w, pxH = o.pxH || view.h, pdf = !!o.pdf;
+  let s = `<svg xmlns="${SVGNS}" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="${n2(pxW)}" height="${n2(pxH)}" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}">`;
+  s += `<title>${esc(P.name)}${art ? ' (art)' : ''}</title>`;
+  if (o.bg !== false) s += `<rect x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" fill="${P.style.bg}"/>`;
+  s += bgImageStr({ export: true, pdf });
+  const objs = P.objects || [];
+  s += objs.filter((ob) => ob.t === 'region' && ob.under).map((ob) => objectStr(ob, { pdf })).join('');
+  const clip = clipOn(); if (clip) s += `<defs>${clipDefStr('mapclipx')}</defs><g clip-path="url(#mapclipx)">`;
+  s += baseFillStr();
+  let fills = '', contents = '';
+  for (const k in P.hexes) {
+    const [c, r] = unkey(k); if (P.voids[k] || !inGrid(c, r)) continue; const h = P.hexes[k];
+    let f = hexFillStr(c, r, h, { pdf, idp: 'x' });
+    // without grid lines, close the hairline gaps browsers leave between neighbouring fills
+    if (art && !(P.style.hexOpacity < 1)) f = f.replace(/<path d="([^"]+)" fill="([^"]+)"\/>/, '<path d="$1" fill="$2" stroke="$2" stroke-width="0.8" stroke-linejoin="round"/>');
+    fills += f;
+    contents += art ? hexArtStr(c, r, h, { pdf }, art) : hexContentStr(c, r, h, { pdf });
+  }
+  const lk = !art || art.links ? linksStr({ art: !!art }) : '';
+  if (art) {
+    let e = ''; if (art.sides) for (const k in P.edges) if (ART_SIDES.includes(P.edges[k].t)) e += edgeStr(k, Object.assign({}, P.edges[k], { label: '' }));
+    s += fills + e + lk + contents;
+  } else s += fills + gridStr() + edgesStr() + lk + contents;
+  if (clip) s += '</g>' + frameStr();
+  if (!art) s += coordsStr();
+  const over = objs.filter((ob) => !(ob.t === 'region' && ob.under) && (!art || ['region', 'icon', 'img'].includes(ob.t)));
+  s += over.map((ob) => objectStr(ob, { pdf })).join('');
+  return s + '</svg>';
+}
+// Page area without measuring the DOM: the area last measured by the editor (saved in P.page), else an estimate.
+function pageBounds() {
+  if (P.page && P.page.w > 0 && P.page.h > 0) return { ...P.page };
+  let b = clipOn() ? clipRect() : hexBoundsExisting();
+  const add = (x0, y0, x1, y1) => { const X0 = Math.min(b.x, x0), Y0 = Math.min(b.y, y0); b = { x: X0, y: Y0, w: Math.max(b.x + b.w, x1) - X0, h: Math.max(b.y + b.h, y1) - Y0 }; };
+  const cb = coordsBounds(); if (cb) add(cb.x, cb.y, cb.x + cb.w, cb.y + cb.h);
+  const bi = P.bgImage; if (bi && P.assets && P.assets[bi.ref] && bi.exp !== false) add(bi.x, bi.y, bi.x + bi.w, bi.y + bi.h);
+  (P.objects || []).forEach((ob) => {
+    if (ob.t === 'region' && ob.pts) ob.pts.forEach(([px, py]) => add(ob.x + px, ob.y + py, ob.x + px, ob.y + py));
+    else if (ob.t === 'icon') add(ob.x, ob.y, ob.x + (ob.size || 60), ob.y + (ob.size || 60));
+    else if (ob.t === 'img') { const w = ob.w || 200, h = ob.h || w / assetAspect(ob.ref); add(ob.x, ob.y, ob.x + w, ob.y + h); }
+    else add(ob.x, ob.y, ob.x + 1, ob.y + 1);
+  });
+  const pad = P.style.pad ?? 40;
+  return { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad };
+}
+
+// =====================================================================
+//  Point-to-point links between cities, towns or hexes (Link tool L).
+//  P.links = [{ id, a: {k:'c,r', i: item index in the hex's own items or null = hex centre}, b,
+//               cost, length, color, w, style: solid|dashed|rail|double, bend (-1…1),
+//               show: cost|length|both|none, tags }]
+// =====================================================================
+const LINK_STYLES = [['solid', 'Solid'], ['dashed', 'Dashed'], ['rail', 'Railroad'], ['double', 'Double']];
+function linkOk(l) { if (!l || !l.a || !l.b) return false; const [c1, r1] = unkey(l.a.k), [c2, r2] = unkey(l.b.k); return exists(c1, r1) && exists(c2, r2); }
+function linkItem(e) { const h = P.hexes[e.k]; return h && e.i != null ? (h.items || [])[e.i] || null : null; }
+function linkEnd(e) { const [c, r] = unkey(e.k), it = linkItem(e); const [x, y] = it ? itemPos(c, r, it) : center(c, r); return { x, y, it }; }
+// hex steps between two hexes (straight-line distance on the grid)
+function hexSteps(k1, k2) {
+  const [x1, y1] = center(...unkey(k1)), [x2, y2] = center(...unkey(k2)), s = R(), dx = x2 - x1, dy = y2 - y1;
+  let q, r;
+  if (isPointy()) { q = ((SQ3 / 3) * dx - dy / 3) / s; r = ((2 / 3) * dy) / s; } else { q = ((2 / 3) * dx) / s; r = (-dx / 3 + (SQ3 / 3) * dy) / s; }
+  q = Math.round(q); r = Math.round(r); return (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+}
+function linkLength(l) { const n = numbersIn(l.length); return n.length ? n[0] : hexSteps(l.a.k, l.b.k); }
+function linkGeom(l) {
+  const p0 = linkEnd(l.a), p1 = linkEnd(l.b), dx = p1.x - p0.x, dy = p1.y - p0.y, len = Math.hypot(dx, dy) || 1, b = +l.bend || 0;
+  const cx = (p0.x + p1.x) / 2 - dy * b * 0.5, cy = (p0.y + p1.y) / 2 + dx * b * 0.5;
+  const d = b ? `M${n2(p0.x)} ${n2(p0.y)}Q${n2(cx)} ${n2(cy)} ${n2(p1.x)} ${n2(p1.y)}` : `M${n2(p0.x)} ${n2(p0.y)}L${n2(p1.x)} ${n2(p1.y)}`;
+  return { p0, p1, d, len, mid: [0.25 * p0.x + 0.5 * cx + 0.25 * p1.x, 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y] };
+}
+function linkLabelText(l) {
+  const show = l.show || 'cost', cost = String(l.cost ?? '').trim(), len = String(linkLength(l));
+  if (show === 'none') return ''; if (show === 'length') return len; if (show === 'both') return cost ? `${cost} · ${len}` : len;
+  return cost;
+}
+function linkStr(l, o = {}) {
+  const g = linkGeom(l), s = R(), w = (l.w || 1) * s * 0.09, col = l.color || '#3a332a', st = l.style || 'solid';
+  const P_ = (attrs) => `<path d="${g.d}" fill="none"${attrs.includes('stroke-linecap') ? '' : ' stroke-linecap="round"'} ${attrs}/>`;
+  let out = P_(`stroke="#ffffff" stroke-opacity=".85" stroke-width="${n2(w * (st === 'rail' ? 3.6 : st === 'double' ? 3.4 : 2.2))}"`);
+  if (st === 'dashed') out += P_(`stroke="${col}" stroke-width="${n2(w)}" stroke-dasharray="${n2(w * 3)} ${n2(w * 2)}"`);
+  else if (st === 'rail') out += P_(`stroke="${col}" stroke-width="${n2(w * 2.8)}" stroke-linecap="butt" stroke-dasharray="${n2(w * 0.7)} ${n2(w * 1.8)}"`) + P_(`stroke="${col}" stroke-width="${n2(w * 0.8)}"`);
+  else if (st === 'double') out += P_(`stroke="${col}" stroke-width="${n2(w * 2.6)}"`) + P_(`stroke="#ffffff" stroke-width="${n2(w)}"`);
+  else out += P_(`stroke="${col}" stroke-width="${n2(w)}"`);
+  const txt = o.art ? '' : linkLabelText(l);
+  if (txt) {
+    const fs = s * 0.26 * (l.ls || 1), tw = measure(txt, fs, true) + fs * 0.7, th = fs * 1.35, [mx, my] = g.mid;
+    out += `<rect x="${n2(mx - tw / 2)}" y="${n2(my - th / 2)}" width="${n2(tw)}" height="${n2(th)}" rx="${n2(th / 2)}" fill="#ffffff" stroke="${col}" stroke-width="${n2(Math.max(0.6, w * 0.45))}"/>` +
+      textEl(mx, my + fs * 0.35, txt, { fs, bold: true, anchor: 'middle', fill: '#111' });
+  }
+  return out;
+}
+function linksStr(o = {}) {
+  return (P.links || []).filter(linkOk).map((l) => {
+    if (!o.editor) return linkStr(l, o);
+    const g = linkGeom(l), w = (l.w || 1) * R() * 0.09;
+    return `<g data-link="${l.id}" style="cursor:pointer"><path d="${g.d}" fill="none" stroke="transparent" stroke-width="${n2(Math.max(w * 5, R() * 0.3))}"/>${linkStr(l, o)}</g>`;
+  }).join('');
+}
+
+// ---------------- Project files: fill in anything an older file lacks ----------------
+function migrate(obj) {
+  const d = defaultProject();
+  const p = Object.assign(d, obj);
+  p.grid = Object.assign(defaultProject().grid, obj.grid || {});
+  p.style = Object.assign(defaultProject().style, obj.style || {});
+  p.hexes = p.hexes || {}; for (const k in p.hexes) { const h = p.hexes[k]; h.items = h.items || []; h.track = h.track || []; }
+  p.voids = p.voids || {}; p.edges = p.edges || {}; p.objects = p.objects || []; p.links = p.links || []; p.assets = p.assets || {}; p.types = p.types || []; p.palette = p.palette && p.palette.length ? p.palette : [...DEFAULT_PALETTE];
+  p.companies = (p.companies || []).map((c) => { const d = newCompanyShape(); return Object.assign(d, c, { logo: Object.assign(d.logo, c.logo || {}), shares: Object.assign(d.shares, c.shares || {}), tokens: Object.assign(d.tokens, c.tokens || {}) }); });
+  p.compStyle = Object.assign(defaultCompStyle(), p.compStyle || {});
+  return p;
+}
+
 // =====================================================================
 //  Hexcraft editor: state, rendering into the stage, tools, panels
 // =====================================================================
@@ -1742,7 +1890,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const stage = $('#stage'), vpEl = $('#vp');
 const L = {};
-['bgcolor', 'bgimg', 'under', 'clip', 'frame', 'basefill', 'fills', 'grid', 'edges', 'content', 'coords', 'objects', 'overlay'].forEach((n) => (L[n] = $('#L-' + n)));
+['bgcolor', 'bgimg', 'under', 'clip', 'frame', 'basefill', 'fills', 'grid', 'edges', 'links', 'content', 'coords', 'objects', 'overlay'].forEach((n) => (L[n] = $('#L-' + n)));
 
 const S = {
   tool: 'select',
@@ -1994,6 +2142,7 @@ function localOf(c, r, wx, wy) { const [cx, cy] = center(c, r); return [(wx - cx
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
 stage.addEventListener('pointerdown', (e) => {
   if (e.button === 2) return;
+  if (isTyping()) document.activeElement.blur();   // so Delete and tool keys act on the map right after editing a field
   const [wx, wy] = toWorld(e);
   stage.setPointerCapture(e.pointerId);
   if (e.button === 1 || S.space || S.tool === 'pan') { D = { type: 'pan', sx: e.clientX, sy: e.clientY, vx: S.view.x, vy: S.view.y }; $('#main').classList.add('panning'); return; }
@@ -2014,6 +2163,7 @@ stage.addEventListener('pointerdown', (e) => {
     case 'hexside': return hexsideDown(e, wx, wy, c, r);
     case 'shape': return shapeDown(e, wx, wy, c, r);
     case 'region': return regionClick(e, wx, wy);
+    case 'link': return linkDown(e, tgt, wx, wy, c, r);
   }
 });
 stage.addEventListener('dblclick', (e) => { if (S.tool === 'region' && S.draft) { if (S.draft.pts.length > 1) { const a = S.draft.pts[S.draft.pts.length - 1], b = S.draft.pts[S.draft.pts.length - 2]; if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) S.draft.pts.pop(); } finishRegion(); } });
@@ -2024,6 +2174,7 @@ stage.addEventListener('pointermove', (e) => {
   $('#stHex').innerHTML = inGrid(h[0], h[1]) ? `<b>${coordLabel(h[0], h[1]) || '—'}</b> · col ${h[0] + 1}, row ${h[1] + 1}` : '—';
   if (!D) {
     if (S.tool === 'region' && S.draft) { S.draft.cursor = regionSnap(wx, wy, e.altKey); renderOverlay(); return; }
+    if (S.tool === 'link' && S.linkStart) { S.linkCursor = [wx, wy]; renderOverlay(); return; }
     if (S.tool === 'hexside' && exists(h[0], h[1])) { const ne = nearestEdge(h[0], h[1], wx, wy); renderOverlay(edgeHighlight(h[0], h[1], ne.i)); }
     else if (changed) renderOverlay();
     return;
@@ -2182,6 +2333,8 @@ function selectDown(e, tgt, wx, wy, c, r) {
     D = { type: 'obj', id, sx: wx, sy: wy, ox: o.x, oy: o.y, moved: false };
     return;
   }
+  const lEl = tgt.closest('[data-link]');
+  if (lEl) { select({ kind: 'link', id: lEl.dataset.link }); return; }
   if (S.bgAdjust && P.bgImage) { const b = P.bgImage; if (wx >= b.x && wy >= b.y && wx <= b.x + b.w && wy <= b.y + b.h) { checkpoint(); D = { type: 'bg', sx: wx, sy: wy, ox: b.x, oy: b.y }; return; } }
   // hex click, shift-click toggle, or drag a box to select several hexes
   D = { type: 'box', sx: wx, sy: wy, ex: wx, ey: wy, shift: e.shiftKey, k: inGrid(c, r) ? key(c, r) : null, moved: false };
@@ -2198,7 +2351,7 @@ function boxUp(d) {
 function select(sel) {
   const same = JSON.stringify(sel) === JSON.stringify(S.sel);
   S.sel = sel; renderOverlay(); if (!same) renderProps();
-  $('#stSel').textContent = sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'hexes' ? sel.keys.length + ' hexes selected' : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
+  $('#stSel').textContent = sel && sel.kind === 'link' ? 'Link selected' : sel ? (sel.kind === 'hex' ? 'Hex ' + (coordLabel(...unkey(sel.k)) || sel.k) : sel.kind === 'hexes' ? sel.keys.length + ' hexes selected' : sel.kind === 'obj' ? 'Object selected' : 'Editing hex type') : '';
 }
 
 // ----- stamp tool
@@ -2773,6 +2926,7 @@ function renderProps() {
     else if (s.kind === 'hex') html = hexPanel(s.k);
     else if (s.kind === 'obj') { const o = P.objects.find((x) => x.id === s.id); html = o ? objPanel(o) : mapPanel(); }
     else if (s.kind === 'type') { const t = (P.types || []).find((x) => x.id === s.id); html = t ? typePanel(t) : mapPanel(); }
+    else if (s.kind === 'link') { const l = (P.links || []).find((x) => x.id === s.id); html = l ? linkPanel(l) : mapPanel(); }
   } catch (err) { console.error(err); html = `<div class="sec">Panel error: ${esc(err.message)}</div>`; }
   propsEl.innerHTML = html;
   wireProps();
@@ -2866,6 +3020,15 @@ handlers.bgRemove = () => { checkpoint(); const ref = P.bgImage.ref; P.bgImage =
 handlers.delAsset = (d) => confirmBox('Delete upload', 'Remove this icon? Hexes and objects using it will lose it.', 'Delete', () => { checkpoint(); deleteAsset(d.id); });
 handlers.uploadIcon = () => uploadIconsDialog();
 
+// company homes / destinations and link ends follow their hexes when rows or columns move
+function remapHexRefs(mk) {
+  (P.companies || []).forEach((co) => { if (co.home) { const [hk, i, sl] = co.home.split('|'); co.home = `${mk(hk)}|${i}|${sl}`; } if (co.dest) co.dest = mk(co.dest); });
+  remapLinkHexes(mk);
+}
+function dropHexRefs(pred) {
+  (P.companies || []).forEach((co) => { if (co.home) { const [c, r] = unkey(co.home.split('|')[0]); if (pred(c, r)) co.home = ''; } if (co.dest) { const [c, r] = unkey(co.dest); if (pred(c, r)) co.dest = ''; } });
+  dropLinksAt(pred);
+}
 function extendGrid(side, n, raw) {
   const g = P.grid; const s = R();
   if ((side === 'top' || side === 'bottom') && g.rows + n < 1) return;
@@ -2881,6 +3044,7 @@ function extendGrid(side, n, raw) {
     P.hexes = remap(P.hexes); P.voids = remap(P.voids);
     const ne = {}; for (const k in P.edges) { const [c, r, i] = k.split(',').map(Number); ne[(c + dc) + ',' + (r + dr) + ',' + i] = P.edges[k]; } P.edges = ne;
     P.objects.forEach((o) => { o.x += dx; o.y += dy; });
+    remapHexRefs((k) => { const [c, r] = unkey(k); return key(c + dc, r + dr); });
     if (P.bgImage) { P.bgImage.x += dx; P.bgImage.y += dy; }
     S.view.x -= dx * S.view.z; S.view.y -= dy * S.view.z; applyView();
   }
@@ -2888,6 +3052,7 @@ function extendGrid(side, n, raw) {
   for (const k in P.hexes) { const [c, r] = unkey(k); if (!inGrid(c, r)) delete P.hexes[k]; }
   for (const k in P.voids) { const [c, r] = unkey(k); if (!inGrid(c, r)) delete P.voids[k]; }
   for (const k in P.edges) { const { c, r } = edgeFromKey(k); if (c < -1 || r < -1 || c > g.cols || r > g.rows) delete P.edges[k]; }
+  dropHexRefs((c, r) => !inGrid(c, r));
   if (raw) return;
   if (S.sel && S.sel.kind === 'hex') S.sel = null;
   renderAll(); renderProps();
@@ -3243,7 +3408,7 @@ function shiftLines(axis, index, n, opts = {}) {
   // remap data
   const nh = {}; for (const k in P.hexes) nh[mk(k)] = P.hexes[k]; P.hexes = nh;
   const ne = {}; for (const k in P.edges) { const [c, r, i] = k.split(',').map(Number); const nk = mk(key(c, r)); ne[nk + ',' + i] = P.edges[k]; } P.edges = ne;
-  (P.companies || []).forEach((co) => { if (co.home) { const [hk, i, sl] = co.home.split('|'); co.home = `${mk(hk)}|${i}|${sl}`; } if (co.dest) co.dest = mk(co.dest); });
+  remapHexRefs(mk);
   const newPresent = new Set([...oldPresent].map(mk));
   // grid size
   if (axis === 'row') g.rows += n; else g.cols += n;
@@ -3283,7 +3448,7 @@ function deleteLine(axis, index, n = 1) {
   const inLine = (c, r) => { const t = axis === 'row' ? r : c; return t >= index && t < index + n; };
   for (const k in P.hexes) { const [c, r] = unkey(k); if (inLine(c, r)) delete P.hexes[k]; }
   for (const k in P.edges) { const [c, r] = k.split(',').map(Number); if (inLine(c, r)) delete P.edges[k]; }
-  (P.companies || []).forEach((co) => { if (co.home) { const [c, r] = unkey(co.home.split('|')[0]); if (inLine(c, r)) co.home = ''; } if (co.dest) { const [c, r] = unkey(co.dest); if (inLine(c, r)) co.dest = ''; } });
+  dropHexRefs(inLine);
   for (let j = index; j < index + n; j++) for (let t = 0; t < (axis === 'row' ? g.cols : g.rows); t++) P.voids[axis === 'row' ? key(t, j) : key(j, t)] = 1;
   shiftLines(axis, index + n, -n);
   const rowEmpty = (r) => { for (let c = 0; c < P.grid.cols; c++) if (!P.voids[key(c, r)]) return false; return true; };
@@ -3349,6 +3514,7 @@ const HELP = [
       <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes. The <i>Plain</i> style turns edges back to normal.</td></tr>
       <tr><td><kbd>A</kbd></td><td><b>Add / remove hexes</b> — click or drag to remove hexes; click removed hexes or empty space beyond the grid to add.</td></tr>
       <tr><td><kbd>R</kbd></td><td><b>Region</b> — draw freeform shapes: lakes, seas, multi-hex off-board areas, merged hexes.</td></tr>
+      <tr><td><kbd>L</kbd></td><td><b>Links</b> — for point-to-point games: click a city or town, then another, to connect them; keep clicking to chain. Each link has a cost, a length and its own line style.</td></tr>
       <tr><td><kbd>H</kbd> / <kbd>Space</kbd></td><td><b>Pan</b> — drag to move around. Hold Space with any tool. Mouse wheel zooms; <kbd>Shift</kbd>+wheel scrolls sideways.</td></tr>
     </table>
     <h4>Editing</h4>
@@ -3491,6 +3657,7 @@ const HELP = [
       <li><b>Cities and towns</b>: name, slots, revenue values, home marks, which company has its home there, tags and real place.</li>
       <li><b>Hexsides</b> with a style (river, impassable, border…), as the two hexes they separate.</li>
       <li><b>Regions</b> drawn with the Region tool, by name, with the hexes inside them; <b>companies</b> with their home city; free text labels.</li>
+      <li><b>Links</b> drawn with the Link tool <kbd>L</kbd> for point-to-point games: which two cities or towns they join, cost, length and tags.</li>
     </ul>
     <h4>Filling it in</h4>
     <ul>
@@ -3500,7 +3667,12 @@ const HELP = [
       <li><b>Real place</b> on a city or town (latitude, longitude, e.g. <i>40.44, -79.99</i>) lets a program draw real coastlines and borders under the map.</li>
       <li>Give each region a <b>Region name</b> (countries, provinces, companies' territories).</li>
     </ul>
-    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind.</p>`],
+    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind. <b>File › Check game data on the map</b> marks them on the canvas (hatched red: no Kind; orange ring: no name; purple ring: name used twice; dashed red line: a link that ends at a hex with no city or town) and <i>Next problem</i> steps through them. It updates as you fix things.</p>
+    <h4>For programs</h4>
+    <ul>
+      <li><b>Export › Art only</b> gives the picture without grid, cities, towns, text or coordinates, in the same page coordinates as the game data, for use as a board background.</li>
+      <li><b>hexcraft-render.cjs</b> (in the project's GitHub repository) draws a saved <code>.hexmap.json</code> as SVG, or writes its game data, from Node.js — no browser needed. See GAME-DATA.md.</li>
+    </ul>`],
 ];
 function helpDialog(sec = 'start') {
   closeMenus();
@@ -3529,6 +3701,11 @@ const FIELD_TIPS = {
   'Hex opacity': 'Lower it to see a background image through the hexes.',
   'Grid lines': 'Color of the lines between hexes.',
   'Line width': 'Thickness of lines. Set to 0 to hide them.',
+  'Cost': 'Cost of this link, e.g. to build or use it. Shown on the line and exported as a number in game data.',
+  'Length': 'Length of the link for the rules (e.g. spaces or segments). Empty uses the number of hexes between the two places.',
+  'Line color': 'Color of the link line.', 'Line style': 'Solid, dashed, railroad (with ties) or double line.',
+  'Bend': 'Curve the link to one side (0 = straight) so it can go around things.', 'Label size': 'Size of the cost or length label on the link.',
+  'Link tags': 'Any words, comma separated (ferry, double, mountain…), passed on with this link in the game data export.',
   'Page margin': 'Empty space around everything in exports.',
   'Opacity': 'How see-through this is.',
   'Left': 'Horizontal position in map units.', 'Top': 'Vertical position in map units.', 'Width': 'Width in map units; height follows the image’s proportions.',
@@ -3590,6 +3767,7 @@ const ACT_TIPS = {
   insLine: 'Insert blank rows or columns here; everything beyond moves over.', delLine: 'Delete this row or column and close the gap.', trDel: 'Delete this track segment.', trClear: 'Delete all track in this hex.', hexImgUp: 'Upload an image and use it to fill this hex.',
   backMap: 'Finish editing the type.', paintType: 'Switch to the Paint tool using this type.', dupType: 'Make a copy of this type.', delType: 'Delete this type.',
   sidesReset: 'Turn every side of the selected hex(es) back into a normal grid line.', sidesClearAll: 'Remove every hexside style from the whole map.',
+  lkDel: 'Delete this link (Delete key).', lkFlip: 'Curve the link to the other side.',
   mCopy: 'Copy these hexes (Ctrl C). Point at a hex and press Ctrl V to paste.', mCut: 'Copy these hexes and clear them (Ctrl X).', mBrush: 'Paint all selected hexes with the current color or hex type.', mType: 'Create hex types from the different looks among these hexes.', mClear: 'Remove everything from these hexes but keep them on the map.', mVoid: 'Take these hexes off the map (Ctrl Z undoes).',
   coDup: 'Make a copy with the same stats and a new color.', coUp: 'Move this company up the list.', coDown: 'Move this company down the list.', coDel: 'Delete this company (its home marker leaves the map).',
   coPick: 'Go to the map and click a city to make it this company’s home.', coStyle: 'Use this logo style for the company’s tokens and cards.', coUpload: 'Upload a picture to use as this company’s logo.',
@@ -3601,7 +3779,7 @@ const ACT_TIPS = {
   save: 'Save to your library (Ctrl S).', saveas: 'Save a duplicate under a new name.', savefile: 'Download a .hexmap.json project file you can open later.',
   openfile: 'Open a .hexmap.json project file.', 'ins-market1': 'A one-dimensional share price or revenue track.', 'ins-market2': 'A 2D stock market grid with zones and ledges.',
   'ins-table': 'A table for costs, trains, phases or a legend — supports icons.', 'ins-text': 'A free text box for titles and notes.', 'ins-revbox': 'Phase revenue boxes for an off-board area, as a free object you can place anywhere.',
-  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
+  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-check': 'Mark hexes with no Kind, unnamed or duplicate cities and towns, and links to bare hexes right on the map, and step through them.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
 };
 const TOP_TIPS = {
   '#projName': 'Map name — click to rename.', '#undoBtn': 'Undo (Ctrl Z)', '#redoBtn': 'Redo (Ctrl Shift Z)',
@@ -3969,7 +4147,10 @@ function fixHomesOnItemChange(k, mapIdx) {
     if (!co.home) return; const [hk, i, sl] = co.home.split('|'); if (hk !== k) return;
     const ni = mapIdx(+i); co.home = ni == null ? '' : `${hk}|${ni}|${sl}`;
   });
+  if (typeof remapLinkItems === 'function') remapLinkItems(k, mapIdx);
 }
+
+function newCompanyShape() { const keep = P; try { P = P || { companies: [] }; return newCompany(0); } finally { P = keep; } }
 
 // =====================================================================
 //  Companies workspace UI
@@ -4484,6 +4665,203 @@ renderProps = function () {
 };
 
 // =====================================================================
+//  Point-to-point links: the Link tool (L), selection, panel, overlay.
+//  Drawing lives in core.js (linksStr) so exports and the Node renderer share it.
+// =====================================================================
+S.linkOpts = { color: '#3a332a', w: 1, style: 'solid' };
+S.linkStart = null; S.linkCursor = null;
+
+TOOL_DEFS.splice(TOOL_DEFS.findIndex((t) => t[0] === 'pan'), 0,
+  ['link', 'L', 'Links: connect cities and towns (point-to-point)', '<circle cx="4.5" cy="15.5" r="2.6" fill="currentColor"/><circle cx="15.5" cy="4.5" r="2.6" fill="currentColor"/><path d="M6.4 13.6L13.6 6.4" stroke="currentColor" stroke-width="2" stroke-dasharray="2.2 1.6"/>']);
+TOOL_HINTS.link = 'Click a city or town, then another, to connect them. Keep clicking to chain links from the last place; Esc stops. Clicking a hex with no city links its centre. Click a link to edit its cost, length and look.';
+
+function renderLinks() { if (L.links) setHTML(L.links, linksStr({ editor: true })); }
+let _lkRaf = 0;
+function scheduleLinks() { if (!(P.links && P.links.length) || _lkRaf) return; _lkRaf = requestAnimationFrame(() => { _lkRaf = 0; renderLinks(); }); }
+{
+  const _ra = renderAll; renderAll = function (...a) { const r = _ra.apply(this, a); renderLinks(); return r; };
+  const _rh = renderHex; renderHex = function (...a) { const r = _rh.apply(this, a); scheduleLinks(); return r; };
+  const _st = setTool; setTool = function (t) { if (t !== 'link') { S.linkStart = null; } return _st(t); };
+  const _ds = deleteSel; deleteSel = function () {
+    if (S.sel && S.sel.kind === 'link') { checkpoint(); P.links = (P.links || []).filter((l) => l.id !== S.sel.id); renderLinks(); select(null); schedulePaper(); toast('Link deleted (Ctrl Z to undo)'); return; }
+    return _ds();
+  };
+  const _ro = renderOverlay; renderOverlay = function (extra = '') { return _ro(extra + linkOverlay()); };
+  const _rto = renderToolOpts; renderToolOpts = function () { if (S.tool !== 'link') return _rto(); linkToolOpts(); };
+}
+window.addEventListener('keydown', (e) => {
+  if (S.linkStart && e.key === 'Escape' && !isTyping()) { S.linkStart = null; renderOverlay(); e.stopImmediatePropagation(); }
+}, true);
+
+const sameEnd = (a, b) => a.k === b.k && (a.i ?? null) === (b.i ?? null);
+// the city or town nearest the click in hex c,r (own items only), else the hex centre
+function placeAt(c, r, wx, wy) {
+  const k = key(c, r), h = P.hexes[k]; let best = null, bd = Infinity;
+  ((h && h.items) || []).forEach((it, i) => {
+    if (it.t !== 'city' && it.t !== 'town') return;
+    const [x, y] = itemPos(c, r, it), d = Math.hypot(x - wx, y - wy); if (d < bd) { bd = d; best = i; }
+  });
+  return { k, i: best };
+}
+function placeName(e) {
+  const it = linkItem(e), [c, r] = unkey(e.k), co = coordLabel(c, r) || e.k;
+  const lbl = ((P.hexes[e.k] || {}).items || []).find((x) => x.nm && x.text);
+  const nm = (it && it.name) || (lbl && lbl.text) || '';
+  return `${nm ? nm + ' ' : ''}(${co}${it ? '' : ', hex centre'})`;
+}
+function linkDown(e, tgt, wx, wy, c, r) {
+  if (!S.linkStart) { const lEl = tgt.closest('[data-link]'); if (lEl) { select({ kind: 'link', id: lEl.dataset.link }); return; } }
+  if (!exists(c, r)) { S.linkStart = null; renderOverlay(); return; }
+  const p = placeAt(c, r, wx, wy);
+  if (!S.linkStart) { S.linkStart = p; S.linkCursor = [wx, wy]; renderOverlay(); return; }
+  if (sameEnd(S.linkStart, p)) { S.linkStart = null; renderOverlay(); return; }
+  P.links = P.links || [];
+  const dup = P.links.find((l) => (sameEnd(l.a, S.linkStart) && sameEnd(l.b, p)) || (sameEnd(l.a, p) && sameEnd(l.b, S.linkStart)));
+  if (dup) { S.linkStart = p; select({ kind: 'link', id: dup.id }); toast('Those two places are already linked'); return; }
+  checkpoint();
+  const o = S.linkOpts, l = { id: uid('l'), a: { ...S.linkStart }, b: { ...p }, cost: '', length: '', color: o.color, w: o.w, style: o.style };
+  P.links.push(l); renderLinks(); schedulePaper();
+  S.linkStart = p; select({ kind: 'link', id: l.id });
+}
+function linkOverlay() {
+  const z = S.view.z; let s = '';
+  if (S.sel && S.sel.kind === 'link') {
+    const l = (P.links || []).find((x) => x.id === S.sel.id);
+    if (l && linkOk(l)) {
+      const g = linkGeom(l);
+      s += `<path d="${g.d}" fill="none" stroke="#f0a830" stroke-opacity=".55" stroke-width="${n2(Math.max(8 / z, (l.w || 1) * R() * 0.09 * 3))}" stroke-linecap="round" pointer-events="none"/>`;
+      [g.p0, g.p1].forEach((p) => (s += `<circle cx="${n2(p.x)}" cy="${n2(p.y)}" r="${n2(6 / z)}" fill="#f0a830" stroke="#1a1405" stroke-width="${n2(1 / z)}" pointer-events="none"/>`));
+    }
+  }
+  if (S.tool === 'link' && S.linkStart && exists(...unkey(S.linkStart.k))) {
+    const p = linkEnd(S.linkStart), q = S.linkCursor || [p.x, p.y];
+    s += `<path d="M${n2(p.x)} ${n2(p.y)}L${n2(q[0])} ${n2(q[1])}" stroke="#f0a830" stroke-width="${n2(2.5 / z)}" stroke-dasharray="${n2(6 / z)} ${n2(4 / z)}" pointer-events="none"/>` +
+      `<circle cx="${n2(p.x)}" cy="${n2(p.y)}" r="${n2(7 / z)}" fill="#f0a830" stroke="#1a1405" stroke-width="${n2(1 / z)}" pointer-events="none"/>`;
+  }
+  return s;
+}
+function linkToolOpts() {
+  const o = S.linkOpts, el = $('#toolOpts');
+  el.innerHTML = `<h3>New links</h3>
+    <div class="f"><label>Color</label><input type="color" id="lkColor" value="${o.color}"></div>
+    <div class="f"><label>Width</label><div class="row"><input type="range" id="lkW" min="0.3" max="4" step="0.1" value="${o.w}"><span class="echo" style="font:11px var(--mono);color:var(--ink3);width:36px;text-align:right">${o.w}</span></div></div>
+    <div class="f"><label>Style</label><select id="lkStyle">${LINK_STYLES.map(([v, t]) => `<option value="${v}" ${o.style === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="help">${esc(TOOL_HINTS.link)}</div>`;
+  $('#lkColor').oninput = (e) => (o.color = e.target.value);
+  $('#lkW').oninput = (e) => { o.w = +e.target.value; e.target.nextElementSibling.textContent = o.w; };
+  $('#lkStyle').onchange = (e) => (o.style = e.target.value);
+}
+function linkPanel(l) {
+  const after = () => { renderLinks(); renderOverlay(); schedulePaper(); };
+  const auto = hexSteps(l.a.k, l.b.k);
+  return sec('Link', `<div class="help" style="margin-top:0"><b>From</b> ${esc(placeName(l.a))}<br><b>To</b> ${esc(placeName(l.b))}</div>
+    <div ${bind('lk', () => l, after)}>
+      ${F('Cost', I.text('cost', l.cost, 'e.g. 4 or $40'))}
+      ${F('Length', I.text('length', l.length, `${auto} (hexes apart)`))}
+      ${F('Show', I.seg('show', l.show || 'cost', [['cost', 'Cost'], ['length', 'Length'], ['both', 'Both'], ['none', 'None']]))}
+      ${F('Line color', I.color('color', l.color || '#3a332a'))}
+      ${F('Line width', I.range('w', l.w || 1, 0.3, 4, 0.1))}
+      ${F('Line style', I.select('style', l.style || 'solid', LINK_STYLES))}
+      ${F('Bend', I.range('bend', l.bend || 0, -1, 1, 0.05))}
+      ${F('Label size', I.range('ls', l.ls || 1, 0.5, 2.5, 0.05))}
+      ${F('Link tags', I.text('tags', l.tags, 'e.g. ferry, double'))}
+    </div>
+    <div class="help">Cost and length go to <b>File › Export game data</b> as numbers; leave Length empty to use the number of hexes between the two places.</div>
+    <div class="btngrid" style="margin-top:6px"><button class="btn sm" data-act="lkFlip">Bend the other way</button><button class="btn sm danger" data-act="lkDel">Delete link</button></div>`);
+}
+handlers.lkDel = () => deleteSel();
+handlers.lkFlip = () => { const l = (P.links || []).find((x) => x.id === S.sel.id); if (!l) return; checkpoint(); l.bend = -(l.bend || 0.3); renderLinks(); renderOverlay(); renderProps(); schedulePaper(); };
+
+// keep links attached when rows/columns move or hex items are removed or reordered
+function remapLinkHexes(mk) { (P.links || []).forEach((l) => { l.a.k = mk(l.a.k); l.b.k = mk(l.b.k); }); }
+function dropLinksAt(pred) { P.links = (P.links || []).filter((l) => !pred(...unkey(l.a.k)) && !pred(...unkey(l.b.k))); }
+function remapLinkItems(k, mapIdx) {
+  (P.links || []).forEach((l) => [l.a, l.b].forEach((e) => { if (e.k === k && e.i != null) { const ni = mapIdx(e.i); e.i = ni == null ? null : ni; } }));
+}
+
+// =====================================================================
+//  File › Check game data: show on the canvas what the game data export
+//  would warn about — hexes with no Kind, unnamed or duplicate cities and
+//  towns, links that end at a bare hex — with a banner to step through them.
+// =====================================================================
+S.gdCheck = false; S.gdSeq = 0; S.gdPos = -1;
+let _gdCache = null;
+{
+  const _md = markDirty; markDirty = function (...a) { S.gdSeq++; const r = _md.apply(this, a); if (S.gdCheck) scheduleGdBanner(); return r; };
+  const _ro = renderOverlay; renderOverlay = function (extra = '') { return _ro(extra + (S.gdCheck ? gdOverlay() : '')); };
+}
+function gdIssues() {
+  if (_gdCache && _gdCache.seq === S.gdSeq && _gdCache.n === P.grid.cols * P.grid.rows) return _gdCache;
+  const noKind = [], unnamed = [], dupes = [], bare = [], byName = {};
+  for (let r = 0; r < P.grid.rows; r++) for (let c = 0; c < P.grid.cols; c++) {
+    if (!exists(c, r)) continue;
+    const k = key(c, r), h = P.hexes[k] || null, ty = hexType(h);
+    if (h || ty) { if (!((h && h.kind) || (ty && ty.kind))) noKind.push(k); }
+    const own = (h && h.items) || [], tyItems = (ty && ty.items) || [];
+    [...tyItems.map((it) => [it, true]), ...own.map((it) => [it, false])].forEach(([it]) => {
+      if (it.t !== 'city' && it.t !== 'town') return;
+      const [x, y] = itemPos(c, r, it), p = { k, x, y, t: it.t, name: it.name || '' };
+      if (!it.name) unnamed.push(p); else (byName[it.name] = byName[it.name] || []).push(p);
+    });
+  }
+  for (const n in byName) if (byName[n].length > 1) dupes.push(...byName[n]);
+  (P.links || []).filter(linkOk).forEach((l) => { if (!linkItem(l.a) || !linkItem(l.b)) bare.push(l); });
+  const list = [
+    ...noKind.map((k) => ({ k, msg: 'no terrain Kind' })),
+    ...unnamed.map((p) => ({ k: p.k, msg: `${p.t} with no name` })),
+    ...dupes.map((p) => ({ k: p.k, msg: `name “${p.name}” used more than once` })),
+    ...bare.map((l) => ({ k: linkItem(l.a) ? l.b.k : l.a.k, link: l.id, msg: 'link ends at a hex with no city or town' })),
+  ];
+  return (_gdCache = { seq: S.gdSeq, n: P.grid.cols * P.grid.rows, noKind, unnamed, dupes, bare, list });
+}
+function gdOverlay() {
+  const z = S.view.z, is = gdIssues(); let s = '', d = '';
+  is.noKind.forEach((k) => { const [x, y] = center(...unkey(k)); d += hexPathAt(x, y); });
+  if (d) s += `<defs><pattern id="gdHatch" width="${n2(9 / z)}" height="${n2(9 / z)}" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="${n2(3.5 / z)}" height="${n2(9 / z)}" fill="#e53935" fill-opacity=".5"/></pattern></defs>` +
+    `<path d="${d}" fill="url(#gdHatch)" stroke="#e53935" stroke-width="${n2(1.5 / z)}" pointer-events="none"/>`;
+  const ring = (p, col) => `<circle cx="${n2(p.x)}" cy="${n2(p.y)}" r="${n2(R() * 0.42)}" fill="none" stroke="${col}" stroke-width="${n2(3 / z)}" stroke-dasharray="${n2(5 / z)} ${n2(3 / z)}" pointer-events="none"/>`;
+  is.unnamed.forEach((p) => (s += ring(p, '#ff9800')));
+  is.dupes.forEach((p) => (s += ring(p, '#ab47bc')));
+  is.bare.forEach((l) => { const g = linkGeom(l); s += `<path d="${g.d}" fill="none" stroke="#e53935" stroke-width="${n2(3 / z)}" stroke-dasharray="${n2(6 / z)} ${n2(4 / z)}" pointer-events="none"/>`; });
+  return s;
+}
+let _gdT = 0;
+function scheduleGdBanner() { clearTimeout(_gdT); _gdT = setTimeout(() => { if (S.gdCheck) { renderGdBanner(); renderOverlay(); } }, 150); }
+function renderGdBanner() {
+  let el = $('#gdBanner');
+  if (!S.gdCheck) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div'); el.id = 'gdBanner';
+    el.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:5;background:var(--panel,#221d16);color:var(--ink,#eee);border:1px solid var(--line,#444);border-radius:10px;padding:7px 10px;display:flex;gap:10px;align-items:center;font-size:12.5px;box-shadow:0 6px 22px #0006;max-width:92%;flex-wrap:wrap';
+    $('#main').appendChild(el);
+  }
+  const is = gdIssues(), chip = (n, col, txt) => `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:${col};display:inline-block"></i>${n} ${txt}</span>`;
+  const parts = [];
+  if (is.noKind.length) parts.push(chip(is.noKind.length, '#e53935', `hex${is.noKind.length === 1 ? '' : 'es'} with no Kind`));
+  if (is.unnamed.length) parts.push(chip(is.unnamed.length, '#ff9800', `unnamed cit${is.unnamed.length === 1 ? 'y or town' : 'ies or towns'}`));
+  if (is.dupes.length) parts.push(chip(is.dupes.length, '#ab47bc', 'places sharing a name'));
+  if (is.bare.length) parts.push(chip(is.bare.length, '#e53935', `link${is.bare.length === 1 ? '' : 's'} to a bare hex`));
+  el.innerHTML = `<b>Game data check</b>${parts.length ? parts.join('') : '<span style="color:#66bb6a">✓ Everything has a Kind and a name</span>'}
+    ${is.list.length ? '<button class="btn sm" id="gdNext">Next problem ›</button>' : ''}<button class="btn sm" id="gdDone">Done</button>`;
+  const nx = $('#gdNext'); if (nx) nx.onclick = gdNext;
+  $('#gdDone').onclick = () => toggleGameDataCheck(false);
+}
+function gdNext() {
+  const is = gdIssues(); if (!is.list.length) return;
+  S.gdPos = (S.gdPos + 1) % is.list.length; const it = is.list[S.gdPos];
+  const [x, y] = center(...unkey(it.k)), r = stage.getBoundingClientRect();
+  S.view.x = r.width / 2 - x * S.view.z; S.view.y = r.height / 2 - y * S.view.z; applyView();
+  if (S.tool !== 'select') setTool('select');
+  select(it.link ? { kind: 'link', id: it.link } : { kind: 'hex', k: it.k });
+  toast(`${S.gdPos + 1} of ${is.list.length}: ${coordLabel(...unkey(it.k)) || it.k} — ${it.msg}`);
+}
+function toggleGameDataCheck(on = !S.gdCheck) {
+  S.gdCheck = on; S.gdPos = -1; _gdCache = null;
+  renderGdBanner(); renderOverlay();
+  const b = $('#gdCheckBtn'); if (b) b.textContent = on ? 'Stop checking game data' : 'Check game data on the map';
+}
+
+// =====================================================================
 //  18xx Maker compatibility (https://github.com/18xx-maker/18xx-maker)
 //  Import an 18xx Maker game JSON into Hexcraft, and export Hexcraft
 //  maps, companies, privates and stock markets as an 18xx Maker game.
@@ -4847,10 +5225,7 @@ const GAME_DATA_FORMAT = 'hexcraft-game-data', GAME_DATA_VERSION = 1;
 // Suggested terrain kinds (any word may be used; these are only offered in the editor)
 const HEX_KINDS = ['plain', 'rough', 'hill', 'mountain', 'forest', 'swamp', 'desert', 'water', 'lake', 'river', 'coast', 'offboard', 'city', 'town', 'port'];
 
-// "coal, port , start" -> ['coal', 'port', 'start']
-const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
-// every number in a string: "20/30/40" -> [20, 30, 40]; "$60" -> [60]
-const numbersIn = (s) => (String(s ?? '').match(/-?\d+(\.\d+)?/g) || []).map(Number);
+// splitTags() and numbersIn() live in core.js (links use them too)
 // "40.44, -79.99" -> [40.44, -79.99] (latitude, longitude), or null
 function placeOf(s) {
   const n = numbersIn(s);
@@ -4962,18 +5337,32 @@ function gameData() {
   // free text on the page (titles, sea names…) with its position
   const labels = (P.objects || []).filter((o) => o.t === 'text' && o.text).map((o) => ({ text: o.text, x: Math.round(o.x || 0), y: Math.round(o.y || 0) }));
 
+  // point-to-point links (Link tool); from/to name the hex and which of its cities or towns
+  const linkEndOut = (e) => {
+    const [c, r] = unkey(e.k), h = P.hexes[e.k], it = linkItem(e), out = { ...ref(c, r), place: null, index: null, name: null };
+    if (!it) return out;
+    const ty = hexType(h), before = [...((ty && ty.items) || []), ...h.items.slice(0, e.i)];
+    return { ...out, place: it.t, index: before.filter((x) => x.t === it.t).length, name: it.name || null };
+  };
+  const links = (P.links || []).filter(linkOk).map((l) => ({
+    id: l.id, from: linkEndOut(l.a), to: linkEndOut(l.b),
+    cost: numbersIn(l.cost)[0] ?? null, length: linkLength(l), color: l.color || null, style: l.style || 'solid', tags: splitTags(l.tags),
+  }));
+
   const b = hexBoundsExisting();
   return {
     format: GAME_DATA_FORMAT, version: GAME_DATA_VERSION, app: 'hexcraft', name: P.name, exported: new Date().toISOString(),
     grid: { orient: P.grid.orient, stagger: P.grid.stagger, cols: P.grid.cols, rows: P.grid.rows, size: P.grid.size, coords: P.style.coords,
       bounds: { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } },
-    hexes, sides, regions, companies, labels,
+    page: pageBounds(),   // the export page (SVG viewBox), so art exports line up
+    hexes, sides, regions, links, companies, labels,
   };
 }
 
 // File › Export game data: checks the map, then downloads <name>.game.json
 function exportGameData() {
   closeMenus();
+  try { P.page = pageRound(contentBounds(true)); } catch (e) {}
   const data = gameData();
   const notes = [];
   const unnamed = data.hexes.reduce((n, h) => n + h.cities.filter((c) => !c.name).length + h.towns.filter((t) => !t.name).length, 0);
@@ -4984,7 +5373,7 @@ function exportGameData() {
   const noKind = data.hexes.filter((h) => !h.kind).length;
   if (noKind) notes.push(`${noKind} hex${noKind === 1 ? ' has' : 'es have'} no terrain kind (set Kind on the hex type or the hex)`);
   saveBlob(slug(P.name) + '.game.json', JSON.stringify(data, null, 1), 'application/json');
-  if (notes.length) toast('Exported. Check: ' + notes.join('; ') + '.', true);
+  if (notes.length) toast('Exported. Check: ' + notes.join('; ') + '. File › Check game data shows them on the map.', true);
 }
 
 // =====================================================================
@@ -5143,7 +5532,8 @@ const Cloud = {
 // ---------------- Save / autosave ----------------
 S.cloudLinked = false; S.lastSaved = 0; S.saving = false;
 let _autoT = 0, _cloudT = 0;
-function fullJSON() { return JSON.stringify(P); }
+// P.page records the page area the editor measured, so the Node renderer draws the same page
+function fullJSON() { try { P.page = pageRound(contentBounds(true)); } catch (e) {} return JSON.stringify(P); }
 function scheduleAutosave() {
   clearTimeout(_autoT); _autoT = setTimeout(autosaveLocal, 1200);
   if (S.cloudLinked && Cloud.ready) { clearTimeout(_cloudT); _cloudT = setTimeout(() => doSave({ silent: true }), 8000); }
@@ -5194,18 +5584,7 @@ async function doSave(opts = {}) {
   }
   S.saving = false; updateSaveState();
 }
-function migrate(obj) {
-  const d = defaultProject();
-  const p = Object.assign(d, obj);
-  p.grid = Object.assign(defaultProject().grid, obj.grid || {});
-  p.style = Object.assign(defaultProject().style, obj.style || {});
-  p.hexes = p.hexes || {}; for (const k in p.hexes) { const h = p.hexes[k]; h.items = h.items || []; h.track = h.track || []; }
-  p.voids = p.voids || {}; p.edges = p.edges || {}; p.objects = p.objects || []; p.assets = p.assets || {}; p.types = p.types || []; p.palette = p.palette && p.palette.length ? p.palette : [...DEFAULT_PALETTE];
-  p.companies = (p.companies || []).map((c) => { const d = newCompanyShape(); return Object.assign(d, c, { logo: Object.assign(d.logo, c.logo || {}), shares: Object.assign(d.shares, c.shares || {}), tokens: Object.assign(d.tokens, c.tokens || {}) }); });
-  p.compStyle = Object.assign(defaultCompStyle(), p.compStyle || {});
-  return p;
-}
-function newCompanyShape() { const keep = P; try { P = P || { companies: [] }; return newCompany(0); } finally { P = keep; } }
+// migrate() lives in core.js (the Node renderer uses it too)
 function loadProject(json, opts = {}) {
   let obj; try { obj = typeof json === 'string' ? JSON.parse(json) : json; } catch (e) { toast('That file is not a valid map project.', true); return false; }
   if (typeof isMakerGame === 'function' && isMakerGame(obj)) {
@@ -5345,24 +5724,10 @@ function newDialog() {
 }
 
 // ---------------- Export ----------------
-function buildExportSVG(o = {}) {
-  const b = o.bounds || contentBounds(true); const view = o.view || b;
-  const pxW = o.pxW || view.w, pxH = o.pxH || view.h, pdf = !!o.pdf;
-  let s = `<svg xmlns="${SVGNS}" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="${n2(pxW)}" height="${n2(pxH)}" viewBox="${n2(view.x)} ${n2(view.y)} ${n2(view.w)} ${n2(view.h)}">`;
-  s += `<title>${esc(P.name)}</title>`;
-  if (o.bg !== false) s += `<rect x="${n2(b.x)}" y="${n2(b.y)}" width="${n2(b.w)}" height="${n2(b.h)}" fill="${P.style.bg}"/>`;
-  s += bgImageStr({ export: true, pdf });
-  s += P.objects.filter((ob) => ob.t === 'region' && ob.under).map((ob) => objectStr(ob, { pdf })).join('');
-  const clip = clipOn(); if (clip) s += `<defs>${clipDefStr('mapclipx')}</defs><g clip-path="url(#mapclipx)">`;
-  s += baseFillStr();
-  let fills = '', contents = '';
-  for (const k in P.hexes) { const [c, r] = unkey(k); if (P.voids[k] || !inGrid(c, r)) continue; const h = P.hexes[k]; fills += hexFillStr(c, r, h, { pdf, idp: 'x' }); contents += hexContentStr(c, r, h, { pdf }); }
-  s += fills + gridStr() + edgesStr() + contents;
-  if (clip) s += '</g>' + frameStr();
-  s += coordsStr();
-  s += P.objects.filter((ob) => !(ob.t === 'region' && ob.under)).map((ob) => objectStr(ob, { pdf })).join('');
-  return s + '</svg>';
-}
+// The editor measures the real page area; everything else is drawn by mapSVG() in core.js.
+function buildExportSVG(o = {}) { return mapSVG(Object.assign({}, o, { bounds: o.bounds || contentBounds(true) })); }
+const exArt = () => (EX.art ? { sides: EX.artSides, track: EX.artTrack, links: EX.artLinks } : null);
+const pageRound = (b) => ({ x: Math.round(b.x * 100) / 100, y: Math.round(b.y * 100) / 100, w: Math.round(b.w * 100) / 100, h: Math.round(b.h * 100) / 100 });
 async function svgToCanvas(svg, w, h) {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   try {
@@ -5372,7 +5737,7 @@ async function svgToCanvas(svg, w, h) {
 }
 const canvasToBlob = (cv) => new Promise((res) => cv.toBlob(res, 'image/png'));
 const PAPERS = { letter: ['Letter', 215.9, 279.4], legal: ['Legal', 215.9, 355.6], tabloid: ['Tabloid 11×17', 279.4, 431.8], a4: ['A4', 210, 297], a3: ['A3', 297, 420], a2: ['A2', 420, 594], a1: ['A1', 594, 841], a0: ['A0', 841, 1189] };
-const EX = { fmt: 'png', bg: true, scale: 2, pdfMode: 'tile', hexMM: 38.1, paper: 'letter', orient: 'auto', margin: 8, overlap: 10 };
+const EX = { art: false, artSides: true, artTrack: false, artLinks: false, fmt: 'png', bg: true, scale: 2, pdfMode: 'tile', hexMM: 38.1, paper: 'letter', orient: 'auto', margin: 8, overlap: 10 };
 function exportDialog() {
   closeMenus();
   const b = contentBounds(true);
@@ -5395,6 +5760,9 @@ function exportDialog() {
       if (EX.pdfMode === 'page') info = `Scaled to fit one ${PAPERS[EX.paper][0]} sheet`;
     }
     return `<div class="tabs" id="exFmt">${['png', 'svg', 'pdf'].map((f) => `<button data-v="${f}" class="${EX.fmt === f ? 'on' : ''}">${f.toUpperCase()}</button>`).join('')}</div>
+      <div class="f"><label>Content</label><div class="seg" id="exArt"><button data-v="0" class="${EX.art ? '' : 'on'}">Full map</button><button data-v="1" class="${EX.art ? 'on' : ''}">Art only</button></div></div>
+      ${EX.art ? `<div class="help" style="margin-top:0">Just the picture — terrain colours, hex images, icons, regions, background and map edge — with no grid lines, cities, towns, text, coordinates, markets or tables. Same page coordinates as a full export and as <b>Export game data</b>, so a program can use it as a board background.</div>
+        <label class="chk"><input type="checkbox" id="exArtSides" ${EX.artSides ? 'checked' : ''}>Rivers &amp; coasts</label><label class="chk"><input type="checkbox" id="exArtTrack" ${EX.artTrack ? 'checked' : ''}>Pre-printed track</label><label class="chk"><input type="checkbox" id="exArtLinks" ${EX.artLinks ? 'checked' : ''}>Point-to-point links</label>` : ''}
       ${opts}<label class="chk"><input type="checkbox" id="exBg" ${EX.bg ? 'checked' : ''}>Include background color${EX.fmt === 'png' ? ' (off = transparent)' : ''}</label>
       <div class="card" style="font:12.5px var(--mono);color:var(--ink2)">${info}</div>
       <div class="help">Exports include everything inside the page area (map, coordinates, markets, tables, text). Removed hexes and editing outlines are left out.</div>`;
@@ -5408,6 +5776,8 @@ function exportDialog() {
     on('exHex', 'hexMM'); on('exMargin', 'margin'); on('exOverlap', 'overlap');
     const p = $('#exPaper'); if (p) p.onchange = () => { EX.paper = p.value; refresh(); };
     $('#exBg').onchange = (e) => (EX.bg = e.target.checked);
+    $$('#exArt button').forEach((x) => (x.onclick = () => { EX.art = x.dataset.v === '1'; refresh(); }));
+    [['exArtSides', 'artSides'], ['exArtTrack', 'artTrack'], ['exArtLinks', 'artLinks']].forEach(([id, k]) => { const el = $('#' + id); if (el) el.onchange = () => (EX[k] = el.checked); });
   };
   const refresh = () => { $('#modalBody').innerHTML = body(); wire(); };
   openModal('Export map', body(), [{ label: 'Cancel', onClick: closeModal }, { label: 'Export', cls: 'pri', onClick: () => { closeModal(); runExport(); } }]);
@@ -5426,15 +5796,15 @@ function tileLayout(b) {
   return best;
 }
 async function runExport() {
-  const base = slug(P.name); select(S.sel);
+  const base = slug(P.name) + (EX.art ? '-art' : ''); select(S.sel);
   try {
-    if (EX.fmt === 'svg') { await saveBlob(base + '.svg', buildExportSVG({ bg: EX.bg }), 'image/svg+xml'); return; }
+    if (EX.fmt === 'svg') { await saveBlob(base + '.svg', buildExportSVG({ bg: EX.bg, art: exArt() }), 'image/svg+xml'); return; }
     if (EX.fmt === 'png') {
       busy(true, 'Rendering PNG…'); const b = contentBounds(true);
       let sc = EX.scale; const maxSide = 16000, maxArea = 160e6;
       while (sc > 0.25 && (b.w * sc > maxSide || b.h * sc > maxSide || b.w * b.h * sc * sc > maxArea)) sc *= 0.8;
       const w = Math.round(b.w * sc), h = Math.round(b.h * sc);
-      const cv = await svgToCanvas(buildExportSVG({ bg: EX.bg, pxW: w, pxH: h }), w, h);
+      const cv = await svgToCanvas(buildExportSVG({ bg: EX.bg, art: exArt(), pxW: w, pxH: h }), w, h);
       const blob = await canvasToBlob(cv); busy(false);
       if (!blob) { toast('This map is too large for a PNG in this browser. Try a smaller resolution or SVG/PDF.', true); return; }
       if (sc < EX.scale) toast(`Map is very large — PNG was reduced to ${w.toLocaleString()} × ${h.toLocaleString()} px.`);
@@ -5460,14 +5830,14 @@ async function buildPDF() {
     const pxPerMM = (SQ3 * R()) / EX.hexMM; let wPt = (b.w / pxPerMM) * PT, hPt = (b.h / pxPerMM) * PT;
     const lim = 14400; if (wPt > lim || hPt > lim) { const k = lim / Math.max(wPt, hPt); wPt *= k; hPt *= k; toast('Map is larger than the PDF page limit (200 in) — it was scaled down to fit.'); }
     doc = new jsPDF({ unit: 'pt', format: [wPt, hPt], orientation: wPt > hPt ? 'l' : 'p', compress: true });
-    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, pxW: wPt, pxH: hPt }), 0, 0, wPt, hPt);
+    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, pxW: wPt, pxH: hPt }), 0, 0, wPt, hPt);
   } else if (EX.pdfMode === 'page') {
     const [, pw0, ph0] = PAPERS[EX.paper]; let pw = pw0, ph = ph0;
     if (EX.orient === 'l' || (EX.orient === 'auto' && b.w > b.h)) { pw = ph0; ph = pw0; }
     const aw = (pw - 2 * EX.margin) * PT, ah = (ph - 2 * EX.margin) * PT; const k = Math.min(aw / b.w, ah / b.h);
     const w = b.w * k, h = b.h * k;
     doc = new jsPDF({ unit: 'pt', format: [pw * PT, ph * PT], orientation: pw > ph ? 'l' : 'p', compress: true });
-    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, pxW: w, pxH: h }), (pw * PT - w) / 2, (ph * PT - h) / 2, w, h);
+    await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, pxW: w, pxH: h }), (pw * PT - w) / 2, (ph * PT - h) / 2, w, h);
   } else {
     const t = tileLayout(b); const pxmm = t.pxPerMM;
     doc = new jsPDF({ unit: 'pt', format: [t.pw * PT, t.ph * PT], orientation: t.pw > t.ph ? 'l' : 'p', compress: true });
@@ -5476,7 +5846,7 @@ async function buildPDF() {
       if (!first) doc.addPage([t.pw * PT, t.ph * PT], t.pw > t.ph ? 'l' : 'p'); first = false;
       busy(true, `Building PDF… sheet ${j * t.nx + i + 1} of ${total}`);
       const view = { x: b.x + i * t.st * pxmm, y: b.y + j * t.sh * pxmm, w: t.aw * pxmm, h: t.ah * pxmm };
-      await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, pdf: true, bounds: b, view, pxW: t.aw * PT, pxH: t.ah * PT }), EX.margin * PT, EX.margin * PT, t.aw * PT, t.ah * PT);
+      await svgIntoPdf(doc, buildExportSVG({ bg: bgOn, art: exArt(), pdf: true, bounds: b, view, pxW: t.aw * PT, pxH: t.ah * PT }), EX.margin * PT, EX.margin * PT, t.aw * PT, t.ah * PT);
       // trim guides + label
       doc.setDrawColor(150); doc.setLineWidth(0.4);
       const m = EX.margin * PT, x1 = m + t.aw * PT, y1 = m + t.ah * PT, L2 = Math.min(10, m * 0.8);
@@ -5554,6 +5924,7 @@ const ACTS = {
   new: newDialog, open: openDialog, save: () => doSave(), saveas: saveAsCopy,
   savefile: () => saveBlob(slug(P.name) + '.hexmap.json', fullJSON(), 'application/json'),
   'gamedata-export': () => exportGameData(),
+  'gamedata-check': () => toggleGameDataCheck(),
   openfile: openFileFlow,
   'maker-import': () => pickFiles('.json,application/json', false, async (files) => { const txt = await readText(files[0]); loadProject(txt, { cloud: false }); }),
   'maker-export': () => { try { const g = exportMaker(); saveBlob(slug(P.name) + '.18xxmaker.json', JSON.stringify(g, null, 2), 'application/json'); } catch (e) { console.error(e); toast('18xx Maker export failed: ' + e.message, true); } },

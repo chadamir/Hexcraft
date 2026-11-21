@@ -27,6 +27,7 @@ const HELP = [
       <tr><td><kbd>X</kbd></td><td><b>Hexsides</b> — click hex edges for rivers, borders, impassable sides. Drag to do several; <kbd>Shift</kbd> removes. The <i>Plain</i> style turns edges back to normal.</td></tr>
       <tr><td><kbd>A</kbd></td><td><b>Add / remove hexes</b> — click or drag to remove hexes; click removed hexes or empty space beyond the grid to add.</td></tr>
       <tr><td><kbd>R</kbd></td><td><b>Region</b> — draw freeform shapes: lakes, seas, multi-hex off-board areas, merged hexes.</td></tr>
+      <tr><td><kbd>L</kbd></td><td><b>Links</b> — for point-to-point games: click a city or town, then another, to connect them; keep clicking to chain. Each link has a cost, a length and its own line style.</td></tr>
       <tr><td><kbd>H</kbd> / <kbd>Space</kbd></td><td><b>Pan</b> — drag to move around. Hold Space with any tool. Mouse wheel zooms; <kbd>Shift</kbd>+wheel scrolls sideways.</td></tr>
     </table>
     <h4>Editing</h4>
@@ -169,6 +170,7 @@ const HELP = [
       <li><b>Cities and towns</b>: name, slots, revenue values, home marks, which company has its home there, tags and real place.</li>
       <li><b>Hexsides</b> with a style (river, impassable, border…), as the two hexes they separate.</li>
       <li><b>Regions</b> drawn with the Region tool, by name, with the hexes inside them; <b>companies</b> with their home city; free text labels.</li>
+      <li><b>Links</b> drawn with the Link tool <kbd>L</kbd> for point-to-point games: which two cities or towns they join, cost, length and tags.</li>
     </ul>
     <h4>Filling it in</h4>
     <ul>
@@ -178,7 +180,12 @@ const HELP = [
       <li><b>Real place</b> on a city or town (latitude, longitude, e.g. <i>40.44, -79.99</i>) lets a program draw real coastlines and borders under the map.</li>
       <li>Give each region a <b>Region name</b> (countries, provinces, companies' territories).</li>
     </ul>
-    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind.</p>`],
+    <p class="tipline">The export warns about cities or towns without names, names used twice, and hexes with no Kind. <b>File › Check game data on the map</b> marks them on the canvas (hatched red: no Kind; orange ring: no name; purple ring: name used twice; dashed red line: a link that ends at a hex with no city or town) and <i>Next problem</i> steps through them. It updates as you fix things.</p>
+    <h4>For programs</h4>
+    <ul>
+      <li><b>Export › Art only</b> gives the picture without grid, cities, towns, text or coordinates, in the same page coordinates as the game data, for use as a board background.</li>
+      <li><b>hexcraft-render.cjs</b> (in the project's GitHub repository) draws a saved <code>.hexmap.json</code> as SVG, or writes its game data, from Node.js — no browser needed. See GAME-DATA.md.</li>
+    </ul>`],
 ];
 function helpDialog(sec = 'start') {
   closeMenus();
@@ -207,6 +214,11 @@ const FIELD_TIPS = {
   'Hex opacity': 'Lower it to see a background image through the hexes.',
   'Grid lines': 'Color of the lines between hexes.',
   'Line width': 'Thickness of lines. Set to 0 to hide them.',
+  'Cost': 'Cost of this link, e.g. to build or use it. Shown on the line and exported as a number in game data.',
+  'Length': 'Length of the link for the rules (e.g. spaces or segments). Empty uses the number of hexes between the two places.',
+  'Line color': 'Color of the link line.', 'Line style': 'Solid, dashed, railroad (with ties) or double line.',
+  'Bend': 'Curve the link to one side (0 = straight) so it can go around things.', 'Label size': 'Size of the cost or length label on the link.',
+  'Link tags': 'Any words, comma separated (ferry, double, mountain…), passed on with this link in the game data export.',
   'Page margin': 'Empty space around everything in exports.',
   'Opacity': 'How see-through this is.',
   'Left': 'Horizontal position in map units.', 'Top': 'Vertical position in map units.', 'Width': 'Width in map units; height follows the image’s proportions.',
@@ -268,6 +280,7 @@ const ACT_TIPS = {
   insLine: 'Insert blank rows or columns here; everything beyond moves over.', delLine: 'Delete this row or column and close the gap.', trDel: 'Delete this track segment.', trClear: 'Delete all track in this hex.', hexImgUp: 'Upload an image and use it to fill this hex.',
   backMap: 'Finish editing the type.', paintType: 'Switch to the Paint tool using this type.', dupType: 'Make a copy of this type.', delType: 'Delete this type.',
   sidesReset: 'Turn every side of the selected hex(es) back into a normal grid line.', sidesClearAll: 'Remove every hexside style from the whole map.',
+  lkDel: 'Delete this link (Delete key).', lkFlip: 'Curve the link to the other side.',
   mCopy: 'Copy these hexes (Ctrl C). Point at a hex and press Ctrl V to paste.', mCut: 'Copy these hexes and clear them (Ctrl X).', mBrush: 'Paint all selected hexes with the current color or hex type.', mType: 'Create hex types from the different looks among these hexes.', mClear: 'Remove everything from these hexes but keep them on the map.', mVoid: 'Take these hexes off the map (Ctrl Z undoes).',
   coDup: 'Make a copy with the same stats and a new color.', coUp: 'Move this company up the list.', coDown: 'Move this company down the list.', coDel: 'Delete this company (its home marker leaves the map).',
   coPick: 'Go to the map and click a city to make it this company’s home.', coStyle: 'Use this logo style for the company’s tokens and cards.', coUpload: 'Upload a picture to use as this company’s logo.',
@@ -279,7 +292,7 @@ const ACT_TIPS = {
   save: 'Save to your library (Ctrl S).', saveas: 'Save a duplicate under a new name.', savefile: 'Download a .hexmap.json project file you can open later.',
   openfile: 'Open a .hexmap.json project file.', 'ins-market1': 'A one-dimensional share price or revenue track.', 'ins-market2': 'A 2D stock market grid with zones and ledges.',
   'ins-table': 'A table for costs, trains, phases or a legend — supports icons.', 'ins-text': 'A free text box for titles and notes.', 'ins-revbox': 'Phase revenue boxes for an off-board area, as a free object you can place anywhere.',
-  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
+  'ins-image': 'Place an image anywhere on the page.', 'maker-import': 'Open a game file made with 18xx Maker: map, track, cities, terrain, companies, privates and stock market are converted.', 'maker-export': 'Save this map, its companies, privates and stock market as an 18xx Maker game file.', 'gamedata-check': 'Mark hexes with no Kind, unnamed or duplicate cities and towns, and links to bare hexes right on the map, and step through them.', 'gamedata-export': 'Save what the map means — hexes, terrain, costs, cities, hexsides, regions, companies — as a .game.json file for programs. See Help › Game data.', 'upload-icon': 'Upload your own icons to stamp on hexes.', 'upload-bg': 'Put an image behind the hex grid.',
 };
 const TOP_TIPS = {
   '#projName': 'Map name — click to rename.', '#undoBtn': 'Undo (Ctrl Z)', '#redoBtn': 'Redo (Ctrl Shift Z)',

@@ -10,10 +10,7 @@ const GAME_DATA_FORMAT = 'hexcraft-game-data', GAME_DATA_VERSION = 1;
 // Suggested terrain kinds (any word may be used; these are only offered in the editor)
 const HEX_KINDS = ['plain', 'rough', 'hill', 'mountain', 'forest', 'swamp', 'desert', 'water', 'lake', 'river', 'coast', 'offboard', 'city', 'town', 'port'];
 
-// "coal, port , start" -> ['coal', 'port', 'start']
-const splitTags = (s) => String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
-// every number in a string: "20/30/40" -> [20, 30, 40]; "$60" -> [60]
-const numbersIn = (s) => (String(s ?? '').match(/-?\d+(\.\d+)?/g) || []).map(Number);
+// splitTags() and numbersIn() live in core.js (links use them too)
 // "40.44, -79.99" -> [40.44, -79.99] (latitude, longitude), or null
 function placeOf(s) {
   const n = numbersIn(s);
@@ -125,18 +122,32 @@ function gameData() {
   // free text on the page (titles, sea names…) with its position
   const labels = (P.objects || []).filter((o) => o.t === 'text' && o.text).map((o) => ({ text: o.text, x: Math.round(o.x || 0), y: Math.round(o.y || 0) }));
 
+  // point-to-point links (Link tool); from/to name the hex and which of its cities or towns
+  const linkEndOut = (e) => {
+    const [c, r] = unkey(e.k), h = P.hexes[e.k], it = linkItem(e), out = { ...ref(c, r), place: null, index: null, name: null };
+    if (!it) return out;
+    const ty = hexType(h), before = [...((ty && ty.items) || []), ...h.items.slice(0, e.i)];
+    return { ...out, place: it.t, index: before.filter((x) => x.t === it.t).length, name: it.name || null };
+  };
+  const links = (P.links || []).filter(linkOk).map((l) => ({
+    id: l.id, from: linkEndOut(l.a), to: linkEndOut(l.b),
+    cost: numbersIn(l.cost)[0] ?? null, length: linkLength(l), color: l.color || null, style: l.style || 'solid', tags: splitTags(l.tags),
+  }));
+
   const b = hexBoundsExisting();
   return {
     format: GAME_DATA_FORMAT, version: GAME_DATA_VERSION, app: 'hexcraft', name: P.name, exported: new Date().toISOString(),
     grid: { orient: P.grid.orient, stagger: P.grid.stagger, cols: P.grid.cols, rows: P.grid.rows, size: P.grid.size, coords: P.style.coords,
       bounds: { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) } },
-    hexes, sides, regions, companies, labels,
+    page: pageBounds(),   // the export page (SVG viewBox), so art exports line up
+    hexes, sides, regions, links, companies, labels,
   };
 }
 
 // File › Export game data: checks the map, then downloads <name>.game.json
 function exportGameData() {
   closeMenus();
+  try { P.page = pageRound(contentBounds(true)); } catch (e) {}
   const data = gameData();
   const notes = [];
   const unnamed = data.hexes.reduce((n, h) => n + h.cities.filter((c) => !c.name).length + h.towns.filter((t) => !t.name).length, 0);
@@ -147,5 +158,5 @@ function exportGameData() {
   const noKind = data.hexes.filter((h) => !h.kind).length;
   if (noKind) notes.push(`${noKind} hex${noKind === 1 ? ' has' : 'es have'} no terrain kind (set Kind on the hex type or the hex)`);
   saveBlob(slug(P.name) + '.game.json', JSON.stringify(data, null, 1), 'application/json');
-  if (notes.length) toast('Exported. Check: ' + notes.join('; ') + '.', true);
+  if (notes.length) toast('Exported. Check: ' + notes.join('; ') + '. File › Check game data shows them on the map.', true);
 }
