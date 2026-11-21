@@ -748,6 +748,7 @@ function objectStr(o, opt = {}) {
 // ---------------- Map edge clipping (partial hexes) ----------------
 function clipOn() { return !!(P.style.clip && P.style.clip.on); }
 function clipRect() {
+  if (isRound()) { const k = clipCircle(); return { x: k.cx - k.r, y: k.cy - k.r, w: 2 * k.r, h: 2 * k.r }; }
   const c = P.style.clip, s = R(), g = P.grid;
   // outer box of the full grid's hex shapes
   const hw = isPointy() ? (SQ3 / 2) * s : s, hh = isPointy() ? s : (SQ3 / 2) * s;
@@ -757,10 +758,55 @@ function clipRect() {
   const x = X0 + (c.l || 0) * s, y = Y0 + (c.t || 0) * s;
   return { x, y, w: Math.max(1, X1 - (c.r || 0) * s - x), h: Math.max(1, Y1 - (c.b || 0) * s - y) };
 }
-function clipDefStr(id) { const r = clipRect(); return `<clipPath id="${id}"><rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}"/></clipPath>`; }
+function clipDefStr(id) {
+  if (isRound()) { const k = clipCircle(); return `<clipPath id="${id}"><circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}"/></clipPath>`; }
+  const r = clipRect(); return `<clipPath id="${id}"><rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}"/></clipPath>`;
+}
 function frameStr() {
-  if (!clipOn()) return ''; const c = P.style.clip; if (!(c.lw > 0)) return '';
+  if (!clipOn()) return ''; const c = P.style.clip;
+  if (isRound()) {
+    const k = clipCircle(), col = c.line || '#333'; let s = '';
+    if (c.shade) s += `<defs><radialGradient id="hcGlobeShade" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.8" stop-color="#000000" stop-opacity="0.12"/><stop offset="1" stop-color="#000000" stop-opacity="0.38"/></radialGradient></defs>` +
+      `<circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}" fill="url(#hcGlobeShade)"/>`;
+    if (c.grat) {
+      const w = Math.max(0.6, (c.lw || 2) * 0.45); let g = '';
+      [30, 60].forEach((d) => { const rx = k.r * Math.sin((d * Math.PI) / 180); g += `<ellipse cx="${n2(k.cx)}" cy="${n2(k.cy)}" rx="${n2(rx)}" ry="${n2(k.r)}"/>`; });
+      g += `<line x1="${n2(k.cx)}" y1="${n2(k.cy - k.r)}" x2="${n2(k.cx)}" y2="${n2(k.cy + k.r)}"/>`;
+      [-60, -30, 0, 30, 60].forEach((d) => { const a = (d * Math.PI) / 180, y = k.cy - k.r * Math.sin(a), hw = k.r * Math.cos(a); g += `<line x1="${n2(k.cx - hw)}" y1="${n2(y)}" x2="${n2(k.cx + hw)}" y2="${n2(y)}"/>`; });
+      s += `<g fill="none" stroke="${col}" stroke-width="${n2(w)}" stroke-opacity="0.35">${g}</g>`;
+    }
+    if (c.lw > 0) s += `<circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}" fill="none" stroke="${col}" stroke-width="${c.lw}"/>`;
+    return s ? `<g pointer-events="none">${s}</g>` : '';
+  }
+  if (!(c.lw > 0)) return '';
   const r = clipRect(); return `<rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}" fill="none" stroke="${c.line || '#333'}" stroke-width="${c.lw}"/>`;
+}
+
+// ---------------- Round (globe) maps ----------------
+// The circle is centred on the grid and sized as a percentage of the largest circle the grid can hold.
+// Hexes outside it are removed automatically ("shape voids", listed in P.grid.shapeVoids so they can be put back).
+function isRound() { return !!(P.style.clip && P.style.clip.shape === 'circle'); }
+function clipCircle() {
+  const b = gridBounds(), s = R(), c = P.style.clip || {};
+  const dx = isPointy() ? (SQ3 / 2) * s : 0.5 * s, dy = isPointy() ? 0.5 * s : (SQ3 / 2) * s;
+  const rMax = Math.max(s, Math.min(b.w - 2 * dx, b.h - 2 * dy) / 2);
+  return { cx: b.x + b.w / 2, cy: b.y + b.h / 2, r: (rMax * Math.max(10, Math.min(100, c.cpct ?? 100))) / 100 };
+}
+function segDist(px, py, ax, ay, bx, by) { const vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy || 1))); return Math.hypot(px - ax - t * vx, py - ay - t * vy); }
+function hexInCircle(c, r, k, smooth) {
+  const [x, y] = center(c, r), s = R(), d = Math.hypot(x - k.cx, y - k.cy);
+  if (!smooth) return d <= k.r + 0.45 * s;
+  if (d <= k.r) return true; if (d > k.r + s) return false;
+  const pts = corners(x, y); let m = Infinity;
+  for (let i = 0; i < 6; i++) { const a = pts[i], b = pts[(i + 1) % 6]; m = Math.min(m, segDist(k.cx, k.cy, a[0], a[1], b[0], b[1])); }
+  return m < k.r - 0.04 * s;
+}
+function clearShapeVoids() { (P.grid.shapeVoids || []).forEach((k) => delete P.voids[k]); delete P.grid.shapeVoids; }
+function applyShapeVoids() {
+  clearShapeVoids(); if (!isRound()) return;
+  const k = clipCircle(), smooth = clipOn(), g = P.grid, add = [];
+  for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) { const kk = key(c, r); if (!P.voids[kk] && !hexInCircle(c, r, k, smooth)) { P.voids[kk] = 1; add.push(kk); } }
+  if (add.length) g.shapeVoids = add;
 }
 
 // ---------------- Regions (freeform shapes) ----------------

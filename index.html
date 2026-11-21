@@ -1648,6 +1648,7 @@ function objectStr(o, opt = {}) {
 // ---------------- Map edge clipping (partial hexes) ----------------
 function clipOn() { return !!(P.style.clip && P.style.clip.on); }
 function clipRect() {
+  if (isRound()) { const k = clipCircle(); return { x: k.cx - k.r, y: k.cy - k.r, w: 2 * k.r, h: 2 * k.r }; }
   const c = P.style.clip, s = R(), g = P.grid;
   // outer box of the full grid's hex shapes
   const hw = isPointy() ? (SQ3 / 2) * s : s, hh = isPointy() ? s : (SQ3 / 2) * s;
@@ -1657,10 +1658,55 @@ function clipRect() {
   const x = X0 + (c.l || 0) * s, y = Y0 + (c.t || 0) * s;
   return { x, y, w: Math.max(1, X1 - (c.r || 0) * s - x), h: Math.max(1, Y1 - (c.b || 0) * s - y) };
 }
-function clipDefStr(id) { const r = clipRect(); return `<clipPath id="${id}"><rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}"/></clipPath>`; }
+function clipDefStr(id) {
+  if (isRound()) { const k = clipCircle(); return `<clipPath id="${id}"><circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}"/></clipPath>`; }
+  const r = clipRect(); return `<clipPath id="${id}"><rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}"/></clipPath>`;
+}
 function frameStr() {
-  if (!clipOn()) return ''; const c = P.style.clip; if (!(c.lw > 0)) return '';
+  if (!clipOn()) return ''; const c = P.style.clip;
+  if (isRound()) {
+    const k = clipCircle(), col = c.line || '#333'; let s = '';
+    if (c.shade) s += `<defs><radialGradient id="hcGlobeShade" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.8" stop-color="#000000" stop-opacity="0.12"/><stop offset="1" stop-color="#000000" stop-opacity="0.38"/></radialGradient></defs>` +
+      `<circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}" fill="url(#hcGlobeShade)"/>`;
+    if (c.grat) {
+      const w = Math.max(0.6, (c.lw || 2) * 0.45); let g = '';
+      [30, 60].forEach((d) => { const rx = k.r * Math.sin((d * Math.PI) / 180); g += `<ellipse cx="${n2(k.cx)}" cy="${n2(k.cy)}" rx="${n2(rx)}" ry="${n2(k.r)}"/>`; });
+      g += `<line x1="${n2(k.cx)}" y1="${n2(k.cy - k.r)}" x2="${n2(k.cx)}" y2="${n2(k.cy + k.r)}"/>`;
+      [-60, -30, 0, 30, 60].forEach((d) => { const a = (d * Math.PI) / 180, y = k.cy - k.r * Math.sin(a), hw = k.r * Math.cos(a); g += `<line x1="${n2(k.cx - hw)}" y1="${n2(y)}" x2="${n2(k.cx + hw)}" y2="${n2(y)}"/>`; });
+      s += `<g fill="none" stroke="${col}" stroke-width="${n2(w)}" stroke-opacity="0.35">${g}</g>`;
+    }
+    if (c.lw > 0) s += `<circle cx="${n2(k.cx)}" cy="${n2(k.cy)}" r="${n2(k.r)}" fill="none" stroke="${col}" stroke-width="${c.lw}"/>`;
+    return s ? `<g pointer-events="none">${s}</g>` : '';
+  }
+  if (!(c.lw > 0)) return '';
   const r = clipRect(); return `<rect x="${n2(r.x)}" y="${n2(r.y)}" width="${n2(r.w)}" height="${n2(r.h)}" fill="none" stroke="${c.line || '#333'}" stroke-width="${c.lw}"/>`;
+}
+
+// ---------------- Round (globe) maps ----------------
+// The circle is centred on the grid and sized as a percentage of the largest circle the grid can hold.
+// Hexes outside it are removed automatically ("shape voids", listed in P.grid.shapeVoids so they can be put back).
+function isRound() { return !!(P.style.clip && P.style.clip.shape === 'circle'); }
+function clipCircle() {
+  const b = gridBounds(), s = R(), c = P.style.clip || {};
+  const dx = isPointy() ? (SQ3 / 2) * s : 0.5 * s, dy = isPointy() ? 0.5 * s : (SQ3 / 2) * s;
+  const rMax = Math.max(s, Math.min(b.w - 2 * dx, b.h - 2 * dy) / 2);
+  return { cx: b.x + b.w / 2, cy: b.y + b.h / 2, r: (rMax * Math.max(10, Math.min(100, c.cpct ?? 100))) / 100 };
+}
+function segDist(px, py, ax, ay, bx, by) { const vx = bx - ax, vy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy || 1))); return Math.hypot(px - ax - t * vx, py - ay - t * vy); }
+function hexInCircle(c, r, k, smooth) {
+  const [x, y] = center(c, r), s = R(), d = Math.hypot(x - k.cx, y - k.cy);
+  if (!smooth) return d <= k.r + 0.45 * s;
+  if (d <= k.r) return true; if (d > k.r + s) return false;
+  const pts = corners(x, y); let m = Infinity;
+  for (let i = 0; i < 6; i++) { const a = pts[i], b = pts[(i + 1) % 6]; m = Math.min(m, segDist(k.cx, k.cy, a[0], a[1], b[0], b[1])); }
+  return m < k.r - 0.04 * s;
+}
+function clearShapeVoids() { (P.grid.shapeVoids || []).forEach((k) => delete P.voids[k]); delete P.grid.shapeVoids; }
+function applyShapeVoids() {
+  clearShapeVoids(); if (!isRound()) return;
+  const k = clipCircle(), smooth = clipOn(), g = P.grid, add = [];
+  for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) { const kk = key(c, r); if (!P.voids[kk] && !hexInCircle(c, r, k, smooth)) { P.voids[kk] = 1; add.push(kk); } }
+  if (add.length) g.shapeVoids = add;
 }
 
 // ---------------- Regions (freeform shapes) ----------------
@@ -1720,7 +1766,7 @@ function checkpoint(k = '') {
   S.redo = []; S.lastCk = { key: k, t: now }; markDirty(); updateUndoBtns();
 }
 function restore(str) {
-  const assets = P.assets; P = JSON.parse(str); P.assets = assets;
+  const assets = P.assets; P = JSON.parse(str); P.assets = assets; applyShapeVoids();
   if (S.sel && S.sel.kind === 'obj' && !P.objects.find((o) => o.id === S.sel.id)) S.sel = null;
   if (S.sel && S.sel.kind === 'type' && !(P.types || []).find((t) => t.id === S.sel.id)) S.sel = null;
   renderAll(); renderProps(); renderLeft(); markDirty();
@@ -2732,7 +2778,7 @@ function wireProps() {
 // ---------------- Map panel ----------------
 function mapPanel() {
   const g = P.grid, st = P.style;
-  const afterGrid = () => { _relKey = ''; renderAll(); renderLeft(); };
+  const afterGrid = () => { _relKey = ''; applyShapeVoids(); renderAll(); renderLeft(); };
   const afterStyle = (f) => {
     if (['bg'].includes(f)) renderPaper();
     else if (['hexFill', 'hexOpacity', 'gridColor', 'gridWidth', 'coords', 'coordPos', 'coordColor', 'coordSize'].includes(f)) { renderBase(); if (f === 'hexOpacity') renderAllHexes(); schedulePaper(); if (f === 'hexFill') renderTypes(); }
@@ -2755,12 +2801,21 @@ function mapPanel() {
       <button class="btn sm" data-act="ext" data-side="bottom" data-n="1">+ Row at bottom</button><button class="btn sm" data-act="ext" data-side="bottom" data-n="-1">− Row at bottom</button>
       <button class="btn sm" data-act="ext" data-side="left" data-n="1">+ Column left</button><button class="btn sm" data-act="ext" data-side="left" data-n="-1">− Column left</button>
       <button class="btn sm" data-act="ext" data-side="right" data-n="1">+ Column right</button><button class="btn sm" data-act="ext" data-side="right" data-n="-1">− Column right</button>
-    </div>`);
+    </div>
+    <div class="help" style="margin-top:8px">Want a round map for a globe? Set <b>Map shape</b> to <i>Circle</i> under Map edge below.</div>`);
   const cl = P.style.clip || (P.style.clip = { on: false, t: 0.5, r: 0.5, b: 0.5, l: 0.5, line: '#3a332a', lw: 2.5 });
-  h += sec('Map edge', `<div ${bind('clip', () => P.style.clip, (f) => { renderBase(); schedulePaper(); if (f === 'on') renderProps(); })}>
-      ${I.check('on', cl.on, 'Cut hexes at map edge (partial hexes)')}
-      ${cl.on ? `${F('Trim top', I.range('t', cl.t, 0, 2, 0.05))}${F('Trim right', I.range('r', cl.r, 0, 2, 0.05))}${F('Trim bottom', I.range('b', cl.b, 0, 2, 0.05))}${F('Trim left', I.range('l', cl.l, 0, 2, 0.05))}
-      ${F('Edge line', `<div class="row">${I.color('line', cl.line || '#333333')}<input type="number" data-f="lw" data-t="num" min="0" step="0.5" value="${cl.lw}" style="width:70px"></div>`)}` : ''}
+  const round = cl.shape === 'circle';
+  h += sec('Map edge', `<div ${bind('clip', () => P.style.clip, (f) => {
+        if (f === 'shape' && cl.shape === 'circle' && cl.cpct == null) cl.cpct = 100;
+        if (f === 'shape' || f === 'cpct' || f === 'on') { applyShapeVoids(); if (S.sel && S.sel.kind === 'hex' && P.voids[S.sel.k]) S.sel = null; renderAll(); } else { renderBase(); schedulePaper(); }
+        if (f === 'on' || f === 'shape') renderProps(); })}>
+      ${F('Map shape', I.seg('shape', cl.shape || 'rect', [['rect', 'Rectangle'], ['circle', 'Circle (globe)']]))}
+      ${round ? F('Circle size', I.range('cpct', cl.cpct ?? 100, 30, 100, 1)) : ''}
+      ${I.check('on', cl.on, round ? 'Smooth round edge (cut hexes at the circle)' : 'Cut hexes at map edge (partial hexes)')}
+      ${cl.on && !round ? `${F('Trim top', I.range('t', cl.t, 0, 2, 0.05))}${F('Trim right', I.range('r', cl.r, 0, 2, 0.05))}${F('Trim bottom', I.range('b', cl.b, 0, 2, 0.05))}${F('Trim left', I.range('l', cl.l, 0, 2, 0.05))}` : ''}
+      ${cl.on && round ? `${I.check('shade', !!cl.shade, 'Globe shading')}${I.check('grat', !!cl.grat, 'Latitude & longitude lines')}` : ''}
+      ${cl.on ? F('Edge line', `<div class="row">${I.color('line', cl.line || '#333333')}<input type="number" data-f="lw" data-t="num" min="0" step="0.5" value="${cl.lw}" style="width:70px"></div>`) : ''}
+      ${round ? `<div class="help">Hexes outside the circle are removed automatically and come back if you make the circle bigger or switch back to Rectangle. The circle stays centred when you add rows or columns.</div>` : ''}
       <div class="help">For irregular outlines use the <b>Add / remove hexes</b> tool <kbd>A</kbd>; for shapes that don’t follow the grid (lakes, seas, merged hexes) use the <b>Region</b> tool <kbd>R</kbd>.</div></div>`);
   h += sec('Hex coordinates', `<div ${bind('style1', () => P.style, afterStyle)}>
       ${F('Format', I.select('coords', st.coords, [['A1d', 'A1, A3, B2… (18xx)'], ['A1', 'A1, A2, B1… (letters = rows)'], ['1A', '1A, 2A… (letters = columns)'], ['0101', '0101, 0102… (wargame)'], ['num', '1.1, 1.2… (numbers)'], ['none', 'None']]))}
@@ -3241,6 +3296,17 @@ function linesSection(k) {
 handlers.insLine = (d) => insertLines(d.axis, +d.idx, S.insN);
 handlers.delLine = (d) => { const n = S.insN, w = d.axis === 'row' ? 'row' : 'column'; confirmBox(`Delete ${n} ${w}${n > 1 ? 's' : ''}`, `Delete every hex in ${n > 1 ? `these ${n} ${w}s (starting at this hex's ${w})` : `this ${w}`} and close the gap? Everything beyond moves in.`, 'Delete', () => deleteLine(d.axis, +d.idx, n)); };
 
+// Round maps: lift the automatic outside-the-circle hexes while rows/columns move, then re-cut the circle.
+(() => {
+  let depth = 0;
+  const wrap = (fn) => function (...a) {
+    if (depth || !isRound()) { depth++; try { return fn.apply(this, a); } finally { depth--; } }
+    depth++; clearShapeVoids();
+    try { return fn.apply(this, a); } finally { depth--; applyShapeVoids(); renderAll(); }
+  };
+  extendGrid = wrap(extendGrid); shiftLines = wrap(shiftLines); deleteLine = wrap(deleteLine);
+})();
+
 // =====================================================================
 //  Help: documentation modal + hover tips
 // =====================================================================
@@ -3329,6 +3395,7 @@ const HELP = [
       <li><b>Add / remove hexes</b> <kbd>A</kbd>: click or drag to remove hexes (coastlines, ragged rows, gaps). Click a removed hex to bring it back, or click anywhere outside the grid to add a hex there — the grid grows automatically. Removed hexes show as dashed outlines while editing and never export.</li>
       <li><b>Delete key:</b> select an empty hex and press <kbd>Del</kbd> to remove it.</li>
       <li><b>Cut hexes at map edge:</b> in map settings › Map edge, trim each side to leave partial hexes along the board edge, with an optional edge line.</li>
+      <li><b>Round maps (globes):</b> choose <i>Circle (globe)</i> as the shape when you make a new map, or set <i>Map shape</i> to <i>Circle</i> under map settings › Map edge. Hexes outside the circle disappear automatically. <i>Circle size</i> shrinks or grows it; <i>Smooth round edge</i> cuts the rim hexes along the circle (turn it off for a stepped edge of whole hexes); <i>Globe shading</i> and <i>Latitude &amp; longitude lines</i> make it read as a sphere. Switching back to <i>Rectangle</i> brings every hex back.</li>
       <li><b>Regions</b> <kbd>R</kbd>: freeform shapes that snap to hex corners and edge midpoints (<kbd>Alt</kbd> for free placement). Use them for lakes and seas, off-board areas spanning several hexes, merged “double” hexes, or borders that don't follow the grid. Turn on <i>Smooth curves</i> for coastlines, or <i>Behind the hex grid</i> to put a shape under the hexes.</li>
       <li><b>Hexsides</b> <kbd>X</kbd>: rivers, coasts, impassable sides, colored lines, dashed or dotted borders, each with an optional label such as <code>$40</code>. <i>Hide grid line</i> removes the line between two hexes so they merge into one shape.</li>
       <li><b>Back to plain:</b> choose <i>Plain (remove style)</i> in the Hexsides tool and click or drag along edges; or press <i>Reset hexsides to plain</i> in a hex's panel (also for several selected hexes); or use the Erase tool's <i>Hexsides only</i> mode; or <i>Clear all hexsides…</i> in map settings.</li>
@@ -3463,6 +3530,7 @@ const FIELD_TIPS = {
   'Header': 'Header row background and text colors.', 'Body': 'Body background and text colors.',
   'Stripes': 'Alternate row shading.', 'Title size': 'Size of the title text.',
   'X': 'Horizontal position.', 'Y': 'Vertical position.',
+  'Map shape': 'Rectangle, or Circle for a round globe map. Hexes outside the circle are removed automatically and return if you switch back.', 'Circle size': 'Size of the round map as a percentage of the largest circle the grid can hold.',
   'Trim top': 'How much of the top hexes to cut off, in hex radii.', 'Trim right': 'How much of the right hexes to cut off.',
   'Trim bottom': 'How much of the bottom hexes to cut off.', 'Trim left': 'How much of the left hexes to cut off.',
   'Edge line': 'Line drawn along the cut map edge: color and thickness (0 hides it).',
@@ -5061,17 +5129,31 @@ function makePreset(pk, name, cols, rows) {
   p.name = name || 'Untitled map'; p.types = presetTypes(pk); p.palette = [...(PRESET_PALETTES[pk] || DEFAULT_PALETTE)];
   return p;
 }
+// rows needed for a round map N hexes across, so the circle fills the grid both ways
+function globeRows(n, orient) { return Math.max(3, Math.round(orient === 'flat' ? (n * 1.5) / SQ3 + 0.6 : (n * SQ3) / 1.5 + 0.3)); }
 function newDialog() {
-  closeMenus(); let pk = '18xx';
+  closeMenus(); let pk = '18xx', shape = 'rect';
   openModal('New map', `<div class="presets">${Object.entries(PRESETS).map(([k, v]) => `<button class="preset ${k === pk ? 'on' : ''}" data-pk="${k}"><b>${v.label}</b><small>${v.desc}</small></button>`).join('')}</div>
     <div class="f"><label>Name</label><input type="text" id="nmName" value="Untitled map"></div>
-    <div class="btngrid"><div class="f full"><label>Columns</label><input type="number" id="nmCols" min="1" value="${PRESETS[pk].grid.cols}"></div><div class="f full"><label>Rows</label><input type="number" id="nmRows" min="1" value="${PRESETS[pk].grid.rows}"></div></div>
+    <div class="f"><label>Shape</label><div class="seg" id="nmShape"><button type="button" data-v="rect" class="on">Rectangle</button><button type="button" data-v="circle">Circle (globe)</button></div></div>
+    <div class="btngrid" id="nmRect"><div class="f full"><label>Columns</label><input type="number" id="nmCols" min="1" value="${PRESETS[pk].grid.cols}"></div><div class="f full"><label>Rows</label><input type="number" id="nmRows" min="1" value="${PRESETS[pk].grid.rows}"></div></div>
+    <div id="nmCirc" style="display:none"><div class="f"><label>Hexes across</label><input type="number" id="nmAcross" min="5" value="25"></div>
+      <div class="help" style="margin-top:0">The map starts as a circle with a smooth round edge and globe shading. Size, shading and latitude lines can be changed under Map edge.</div></div>
     <div class="help">Your current map stays saved — find it under File › Open saved maps. Everything here can be changed later.</div>`,
     [{ label: 'Cancel', onClick: closeModal }, { label: 'Create map', cls: 'pri', onClick: () => {
-      const p = makePreset(pk, $('#nmName').value.trim() || 'Untitled map', Math.max(1, +$('#nmCols').value || 12), Math.max(1, +$('#nmRows').value || 10));
-      closeModal(); loadProject(JSON.stringify(p), { quiet: true }); toast('New map created');
+      const nm = $('#nmName').value.trim() || 'Untitled map';
+      let p;
+      if (shape === 'circle') {
+        const n = Math.max(5, +$('#nmAcross').value || 25), o = PRESETS[pk].grid.orient || 'pointy';
+        p = makePreset(pk, nm, n, globeRows(n, o));
+        Object.assign(p.style.clip, { shape: 'circle', cpct: 100, on: true, shade: true, grat: false });
+      } else p = makePreset(pk, nm, Math.max(1, +$('#nmCols').value || 12), Math.max(1, +$('#nmRows').value || 10));
+      closeModal(); loadProject(JSON.stringify(p), { quiet: true });
+      if (shape === 'circle') { applyShapeVoids(); S.undo = []; S.redo = []; updateUndoBtns(); renderAll(); if (typeof fitView === 'function') fitView(); }
+      toast('New map created');
     } }]);
   $$('.preset').forEach((b) => (b.onclick = () => { pk = b.dataset.pk; $$('.preset').forEach((x) => x.classList.toggle('on', x === b)); $('#nmCols').value = PRESETS[pk].grid.cols; $('#nmRows').value = PRESETS[pk].grid.rows; }));
+  $$('#nmShape button').forEach((b) => (b.onclick = () => { shape = b.dataset.v; $$('#nmShape button').forEach((x) => x.classList.toggle('on', x === b)); $('#nmRect').style.display = shape === 'rect' ? '' : 'none'; $('#nmCirc').style.display = shape === 'circle' ? '' : 'none'; }));
 }
 
 // ---------------- Export ----------------

@@ -86,6 +86,7 @@ const HELP = [
       <li><b>Add / remove hexes</b> <kbd>A</kbd>: click or drag to remove hexes (coastlines, ragged rows, gaps). Click a removed hex to bring it back, or click anywhere outside the grid to add a hex there — the grid grows automatically. Removed hexes show as dashed outlines while editing and never export.</li>
       <li><b>Delete key:</b> select an empty hex and press <kbd>Del</kbd> to remove it.</li>
       <li><b>Cut hexes at map edge:</b> in map settings › Map edge, trim each side to leave partial hexes along the board edge, with an optional edge line.</li>
+      <li><b>Round maps (globes):</b> choose <i>Circle (globe)</i> as the shape when you make a new map, or set <i>Map shape</i> to <i>Circle</i> under map settings › Map edge. Hexes outside the circle disappear automatically. <i>Circle size</i> shrinks or grows it; <i>Smooth round edge</i> cuts the rim hexes along the circle (turn it off for a stepped edge of whole hexes); <i>Globe shading</i> and <i>Latitude &amp; longitude lines</i> make it read as a sphere. Switching back to <i>Rectangle</i> brings every hex back.</li>
       <li><b>Regions</b> <kbd>R</kbd>: freeform shapes that snap to hex corners and edge midpoints (<kbd>Alt</kbd> for free placement). Use them for lakes and seas, off-board areas spanning several hexes, merged “double” hexes, or borders that don't follow the grid. Turn on <i>Smooth curves</i> for coastlines, or <i>Behind the hex grid</i> to put a shape under the hexes.</li>
       <li><b>Hexsides</b> <kbd>X</kbd>: rivers, coasts, impassable sides, colored lines, dashed or dotted borders, each with an optional label such as <code>$40</code>. <i>Hide grid line</i> removes the line between two hexes so they merge into one shape.</li>
       <li><b>Back to plain:</b> choose <i>Plain (remove style)</i> in the Hexsides tool and click or drag along edges; or press <i>Reset hexsides to plain</i> in a hex's panel (also for several selected hexes); or use the Erase tool's <i>Hexsides only</i> mode; or <i>Clear all hexsides…</i> in map settings.</li>
@@ -220,6 +221,7 @@ const FIELD_TIPS = {
   'Header': 'Header row background and text colors.', 'Body': 'Body background and text colors.',
   'Stripes': 'Alternate row shading.', 'Title size': 'Size of the title text.',
   'X': 'Horizontal position.', 'Y': 'Vertical position.',
+  'Map shape': 'Rectangle, or Circle for a round globe map. Hexes outside the circle are removed automatically and return if you switch back.', 'Circle size': 'Size of the round map as a percentage of the largest circle the grid can hold.',
   'Trim top': 'How much of the top hexes to cut off, in hex radii.', 'Trim right': 'How much of the right hexes to cut off.',
   'Trim bottom': 'How much of the bottom hexes to cut off.', 'Trim left': 'How much of the left hexes to cut off.',
   'Edge line': 'Line drawn along the cut map edge: color and thickness (0 hides it).',

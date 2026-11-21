@@ -70,7 +70,7 @@ function wireProps() {
 // ---------------- Map panel ----------------
 function mapPanel() {
   const g = P.grid, st = P.style;
-  const afterGrid = () => { _relKey = ''; renderAll(); renderLeft(); };
+  const afterGrid = () => { _relKey = ''; applyShapeVoids(); renderAll(); renderLeft(); };
   const afterStyle = (f) => {
     if (['bg'].includes(f)) renderPaper();
     else if (['hexFill', 'hexOpacity', 'gridColor', 'gridWidth', 'coords', 'coordPos', 'coordColor', 'coordSize'].includes(f)) { renderBase(); if (f === 'hexOpacity') renderAllHexes(); schedulePaper(); if (f === 'hexFill') renderTypes(); }
@@ -93,12 +93,21 @@ function mapPanel() {
       <button class="btn sm" data-act="ext" data-side="bottom" data-n="1">+ Row at bottom</button><button class="btn sm" data-act="ext" data-side="bottom" data-n="-1">− Row at bottom</button>
       <button class="btn sm" data-act="ext" data-side="left" data-n="1">+ Column left</button><button class="btn sm" data-act="ext" data-side="left" data-n="-1">− Column left</button>
       <button class="btn sm" data-act="ext" data-side="right" data-n="1">+ Column right</button><button class="btn sm" data-act="ext" data-side="right" data-n="-1">− Column right</button>
-    </div>`);
+    </div>
+    <div class="help" style="margin-top:8px">Want a round map for a globe? Set <b>Map shape</b> to <i>Circle</i> under Map edge below.</div>`);
   const cl = P.style.clip || (P.style.clip = { on: false, t: 0.5, r: 0.5, b: 0.5, l: 0.5, line: '#3a332a', lw: 2.5 });
-  h += sec('Map edge', `<div ${bind('clip', () => P.style.clip, (f) => { renderBase(); schedulePaper(); if (f === 'on') renderProps(); })}>
-      ${I.check('on', cl.on, 'Cut hexes at map edge (partial hexes)')}
-      ${cl.on ? `${F('Trim top', I.range('t', cl.t, 0, 2, 0.05))}${F('Trim right', I.range('r', cl.r, 0, 2, 0.05))}${F('Trim bottom', I.range('b', cl.b, 0, 2, 0.05))}${F('Trim left', I.range('l', cl.l, 0, 2, 0.05))}
-      ${F('Edge line', `<div class="row">${I.color('line', cl.line || '#333333')}<input type="number" data-f="lw" data-t="num" min="0" step="0.5" value="${cl.lw}" style="width:70px"></div>`)}` : ''}
+  const round = cl.shape === 'circle';
+  h += sec('Map edge', `<div ${bind('clip', () => P.style.clip, (f) => {
+        if (f === 'shape' && cl.shape === 'circle' && cl.cpct == null) cl.cpct = 100;
+        if (f === 'shape' || f === 'cpct' || f === 'on') { applyShapeVoids(); if (S.sel && S.sel.kind === 'hex' && P.voids[S.sel.k]) S.sel = null; renderAll(); } else { renderBase(); schedulePaper(); }
+        if (f === 'on' || f === 'shape') renderProps(); })}>
+      ${F('Map shape', I.seg('shape', cl.shape || 'rect', [['rect', 'Rectangle'], ['circle', 'Circle (globe)']]))}
+      ${round ? F('Circle size', I.range('cpct', cl.cpct ?? 100, 30, 100, 1)) : ''}
+      ${I.check('on', cl.on, round ? 'Smooth round edge (cut hexes at the circle)' : 'Cut hexes at map edge (partial hexes)')}
+      ${cl.on && !round ? `${F('Trim top', I.range('t', cl.t, 0, 2, 0.05))}${F('Trim right', I.range('r', cl.r, 0, 2, 0.05))}${F('Trim bottom', I.range('b', cl.b, 0, 2, 0.05))}${F('Trim left', I.range('l', cl.l, 0, 2, 0.05))}` : ''}
+      ${cl.on && round ? `${I.check('shade', !!cl.shade, 'Globe shading')}${I.check('grat', !!cl.grat, 'Latitude & longitude lines')}` : ''}
+      ${cl.on ? F('Edge line', `<div class="row">${I.color('line', cl.line || '#333333')}<input type="number" data-f="lw" data-t="num" min="0" step="0.5" value="${cl.lw}" style="width:70px"></div>`) : ''}
+      ${round ? `<div class="help">Hexes outside the circle are removed automatically and come back if you make the circle bigger or switch back to Rectangle. The circle stays centred when you add rows or columns.</div>` : ''}
       <div class="help">For irregular outlines use the <b>Add / remove hexes</b> tool <kbd>A</kbd>; for shapes that don’t follow the grid (lakes, seas, merged hexes) use the <b>Region</b> tool <kbd>R</kbd>.</div></div>`);
   h += sec('Hex coordinates', `<div ${bind('style1', () => P.style, afterStyle)}>
       ${F('Format', I.select('coords', st.coords, [['A1d', 'A1, A3, B2… (18xx)'], ['A1', 'A1, A2, B1… (letters = rows)'], ['1A', '1A, 2A… (letters = columns)'], ['0101', '0101, 0102… (wargame)'], ['num', '1.1, 1.2… (numbers)'], ['none', 'None']]))}
@@ -578,3 +587,14 @@ function linesSection(k) {
 }
 handlers.insLine = (d) => insertLines(d.axis, +d.idx, S.insN);
 handlers.delLine = (d) => { const n = S.insN, w = d.axis === 'row' ? 'row' : 'column'; confirmBox(`Delete ${n} ${w}${n > 1 ? 's' : ''}`, `Delete every hex in ${n > 1 ? `these ${n} ${w}s (starting at this hex's ${w})` : `this ${w}`} and close the gap? Everything beyond moves in.`, 'Delete', () => deleteLine(d.axis, +d.idx, n)); };
+
+// Round maps: lift the automatic outside-the-circle hexes while rows/columns move, then re-cut the circle.
+(() => {
+  let depth = 0;
+  const wrap = (fn) => function (...a) {
+    if (depth || !isRound()) { depth++; try { return fn.apply(this, a); } finally { depth--; } }
+    depth++; clearShapeVoids();
+    try { return fn.apply(this, a); } finally { depth--; applyShapeVoids(); renderAll(); }
+  };
+  extendGrid = wrap(extendGrid); shiftLines = wrap(shiftLines); deleteLine = wrap(deleteLine);
+})();

@@ -328,17 +328,31 @@ function makePreset(pk, name, cols, rows) {
   p.name = name || 'Untitled map'; p.types = presetTypes(pk); p.palette = [...(PRESET_PALETTES[pk] || DEFAULT_PALETTE)];
   return p;
 }
+// rows needed for a round map N hexes across, so the circle fills the grid both ways
+function globeRows(n, orient) { return Math.max(3, Math.round(orient === 'flat' ? (n * 1.5) / SQ3 + 0.6 : (n * SQ3) / 1.5 + 0.3)); }
 function newDialog() {
-  closeMenus(); let pk = '18xx';
+  closeMenus(); let pk = '18xx', shape = 'rect';
   openModal('New map', `<div class="presets">${Object.entries(PRESETS).map(([k, v]) => `<button class="preset ${k === pk ? 'on' : ''}" data-pk="${k}"><b>${v.label}</b><small>${v.desc}</small></button>`).join('')}</div>
     <div class="f"><label>Name</label><input type="text" id="nmName" value="Untitled map"></div>
-    <div class="btngrid"><div class="f full"><label>Columns</label><input type="number" id="nmCols" min="1" value="${PRESETS[pk].grid.cols}"></div><div class="f full"><label>Rows</label><input type="number" id="nmRows" min="1" value="${PRESETS[pk].grid.rows}"></div></div>
+    <div class="f"><label>Shape</label><div class="seg" id="nmShape"><button type="button" data-v="rect" class="on">Rectangle</button><button type="button" data-v="circle">Circle (globe)</button></div></div>
+    <div class="btngrid" id="nmRect"><div class="f full"><label>Columns</label><input type="number" id="nmCols" min="1" value="${PRESETS[pk].grid.cols}"></div><div class="f full"><label>Rows</label><input type="number" id="nmRows" min="1" value="${PRESETS[pk].grid.rows}"></div></div>
+    <div id="nmCirc" style="display:none"><div class="f"><label>Hexes across</label><input type="number" id="nmAcross" min="5" value="25"></div>
+      <div class="help" style="margin-top:0">The map starts as a circle with a smooth round edge and globe shading. Size, shading and latitude lines can be changed under Map edge.</div></div>
     <div class="help">Your current map stays saved — find it under File › Open saved maps. Everything here can be changed later.</div>`,
     [{ label: 'Cancel', onClick: closeModal }, { label: 'Create map', cls: 'pri', onClick: () => {
-      const p = makePreset(pk, $('#nmName').value.trim() || 'Untitled map', Math.max(1, +$('#nmCols').value || 12), Math.max(1, +$('#nmRows').value || 10));
-      closeModal(); loadProject(JSON.stringify(p), { quiet: true }); toast('New map created');
+      const nm = $('#nmName').value.trim() || 'Untitled map';
+      let p;
+      if (shape === 'circle') {
+        const n = Math.max(5, +$('#nmAcross').value || 25), o = PRESETS[pk].grid.orient || 'pointy';
+        p = makePreset(pk, nm, n, globeRows(n, o));
+        Object.assign(p.style.clip, { shape: 'circle', cpct: 100, on: true, shade: true, grat: false });
+      } else p = makePreset(pk, nm, Math.max(1, +$('#nmCols').value || 12), Math.max(1, +$('#nmRows').value || 10));
+      closeModal(); loadProject(JSON.stringify(p), { quiet: true });
+      if (shape === 'circle') { applyShapeVoids(); S.undo = []; S.redo = []; updateUndoBtns(); renderAll(); if (typeof fitView === 'function') fitView(); }
+      toast('New map created');
     } }]);
   $$('.preset').forEach((b) => (b.onclick = () => { pk = b.dataset.pk; $$('.preset').forEach((x) => x.classList.toggle('on', x === b)); $('#nmCols').value = PRESETS[pk].grid.cols; $('#nmRows').value = PRESETS[pk].grid.rows; }));
+  $$('#nmShape button').forEach((b) => (b.onclick = () => { shape = b.dataset.v; $$('#nmShape button').forEach((x) => x.classList.toggle('on', x === b)); $('#nmRect').style.display = shape === 'rect' ? '' : 'none'; $('#nmCirc').style.display = shape === 'circle' ? '' : 'none'; }));
 }
 
 // ---------------- Export ----------------

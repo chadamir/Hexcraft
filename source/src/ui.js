@@ -32,7 +32,7 @@ function checkpoint(k = '') {
   S.redo = []; S.lastCk = { key: k, t: now }; markDirty(); updateUndoBtns();
 }
 function restore(str) {
-  const assets = P.assets; P = JSON.parse(str); P.assets = assets;
+  const assets = P.assets; P = JSON.parse(str); P.assets = assets; applyShapeVoids();
   if (S.sel && S.sel.kind === 'obj' && !P.objects.find((o) => o.id === S.sel.id)) S.sel = null;
   if (S.sel && S.sel.kind === 'type' && !(P.types || []).find((t) => t.id === S.sel.id)) S.sel = null;
   renderAll(); renderProps(); renderLeft(); markDirty();
