@@ -56,6 +56,8 @@ const HELP = [
     </ul>
     <h4>Items inside a hex</h4>
     <h4>Copy &amp; paste</h4>
+    <h4>Changing many hexes at once</h4>
+    <p>With the Select tool, <kbd>Shift</kbd>- or <kbd>Ctrl</kbd>-click hexes (<kbd>Cmd</kbd> on a Mac), or drag a box across the map. The panel then sets <b>Hex type</b>, <b>Color</b>, <b>Outline</b> and <b>Game data</b> (Kind, Build cost, Tags) for every selected hex at once. Fields the hexes disagree on show <i>mixed</i>; choosing or typing a value sets it on all of them. Setting a hex type replaces each hex's own color, like painting with the type.</p>
     <p>Select one hex, Shift-click more, or drag a box across empty hexes with the Select tool. <kbd>Ctrl C</kbd> copies everything on them — color, hex type, icons, cities, labels, costs, track, hexsides and outlines. Point at a hex and press <kbd>Ctrl V</kbd>: the group lands with its top-left hex under the pointer, keeping its shape. <kbd>Ctrl X</kbd> cuts. You can paste into another map too (same hex orientation); hex types and uploaded images come along. Company home markers stay with the original city.</p>
     <p>With several hexes selected, the right panel can also apply the current brush, clear them, remove them, or turn them into hex types.</p>
     <h4>Outlines &amp; merged hexes</h4>

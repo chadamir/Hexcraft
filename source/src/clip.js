@@ -140,10 +140,42 @@ window.addEventListener('keydown', (e) => {
 stage.addEventListener('pointermove', (e) => { S._lastWorld = toWorld(e); });
 
 // ---------- multi-hex panel ----------
+// An object that, when a panel field writes to it, writes the same value to every selected hex.
+// sub(h) picks a part of the hex (e.g. its outline); an empty value removes the field; '__mixed' changes nothing.
+function multiTarget(keys, sub, onSet) {
+  const each = (fn) => keys.forEach((k) => { if (P.voids[k]) return; const h = getHex(k, true); fn(h, sub ? sub(h) : h); cleanHex(k); });
+  return new Proxy({}, {
+    set(_, f, v) { if (v === '__mixed') return true; each((h, o) => { if (v === '' || v == null) delete o[f]; else o[f] = v; if (onSet) onSet(h, f, v); }); return true; },
+    deleteProperty(_, f) { each((h, o) => delete o[f]); return true; },
+    get() { return undefined; },
+  });
+}
+// the value all selected hexes share for a field, or MIXED
+const MIXED = Symbol('mixed');
+function commonVal(keys, get) { let v, first = true; for (const k of keys) { const x = get(P.hexes[k] || null) ?? ''; if (first) { v = x; first = false; } else if (x !== v) return MIXED; } return v; }
 function multiPanel(keys) {
   const n = keys.length, filled = keys.filter((k) => P.hexes[k]).length;
-  return sec(`${n} hexes selected`, `<div class="help" style="margin-top:0">Shift-click hexes to add or remove them. Drag across empty hexes to select an area.</div>
-    <div class="btngrid">
+  const after = (f) => { keys.forEach((k) => renderHex(k)); if (f === 'outline' || f === 'color' || f === 'w') renderEdges(); renderOverlay(); schedulePaper(); if (f === 'type') renderProps(); };
+  const ty = commonVal(keys, (h) => h && h.type), fill = commonVal(keys, (h) => h && h.fill);
+  const olc = commonVal(keys, (h) => h && h.outline && h.outline.color);
+  const gd = (f) => commonVal(keys, (h) => h && h[f]);
+  const val = (v) => (v === MIXED ? '' : v), ph = (v, p) => (v === MIXED ? '(mixed — typing sets all)' : p);
+  const kind = gd('kind'), cost = gd('cost'), tags = gd('tags');
+  return sec(`${n} hexes selected`, `<div class="help" style="margin-top:0"><kbd>Shift</kbd>- or <kbd>Ctrl</kbd>-click hexes to add or remove them; drag across the map to select an area. Changes below apply to every selected hex (Ctrl Z undoes).</div>
+    <div ${bind('mhx', () => multiTarget(keys, null, (h, f, v) => { if (f === 'type' && v) delete h.fill; }), after)}>
+      ${F('Hex type', I.select('type', ty === MIXED ? '__mixed' : ty, [...(ty === MIXED ? [['__mixed', '— mixed —']] : []), ['', '— none —'], ...(P.types || []).map((t) => [t.id, t.name])]))}
+      ${F('Color', I.optColor('fill', fill === MIXED ? '' : fill, fill && fill !== MIXED ? fill : '#c9a77c', fill === MIXED ? 'Mixed — set' : 'Custom'))}
+    </div>
+    <div class="help">Setting a hex type replaces each hex's own color, so the type's look shows. Their icons and labels stay.</div>
+    <div ${bind('mhxol', () => multiTarget(keys, (h) => (h.outline = h.outline || {})), () => { renderEdges(); schedulePaper(); })}>
+      ${F('Outline', I.optColor('color', olc === MIXED ? '' : olc, olc && olc !== MIXED ? olc : '#c62828', 'Color'))}
+    </div>`) +
+  sec('Game data', `<div ${bind('mhxgd', () => multiTarget(keys), () => schedulePaper())}>
+      ${F('Kind', kindInput(val(kind), ph(kind, 'e.g. mountain')))}
+      ${F('Build cost', I.text('cost', val(cost), ph(cost, 'e.g. 60')))}
+      ${F('Tags', I.text('tags', val(tags), ph(tags, 'e.g. coal, port')))}
+    </div><div class="help">For <b>File › Export game data</b>; not drawn. Empty uses each hex's type.</div>`) +
+  sec('Actions', `<div class="btngrid">
       <button class="btn sm pri" data-act="mCopy">Copy (Ctrl C)</button><button class="btn sm" data-act="mCut">Cut (Ctrl X)</button>
       <button class="btn sm" data-act="mBrush">Apply current brush</button><button class="btn sm" data-act="mType">Save as hex types</button>
       <button class="btn sm" data-act="mClear">Clear contents</button><button class="btn sm" data-act="sidesReset">Reset hexsides</button>
