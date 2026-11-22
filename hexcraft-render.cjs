@@ -1220,7 +1220,11 @@ const CT_AREAS = [
   ['name', 'Company name', { bold: true }], ['kind', 'Type line', { bold: true, fam: 'sans' }],
   ['info', 'Home / shares row', {}], ['labels', 'Section headings', { bold: true, fam: 'sans' }],
   ['tokens', 'Token costs', { fam: 'sans' }], ['notes', 'Special rules', { italic: true }], ['steps', 'Turn order', { fam: 'sans' }],
+  ['aid', 'Player aid', {}],
 ];
+// Parts of the charter that can be switched off (Companies tab › Charter layout); missing = shown
+const CH_PARTS = [['info', 'Home / shares row'], ['tokens', 'Station tokens / track cubes'], ['treasury', 'Treasury box'], ['main', 'Trains box (income box on cube rails cards)'], ['notes', 'Special rules']];
+const chPart = (k) => ((CS().sections || {})[k] !== false);
 function ctDefault(area) { const a = CT_AREAS.find((x) => x[0] === area); return (a && a[2]) || {}; }
 // effective style for an area: base { fs, bold, italic, fam, fill } adjusted by the user's settings
 function ctStyle(area, base) {
@@ -1418,6 +1422,7 @@ function charterSVG(co, W, H, opt = {}) {
   if (co.dest) info.push(['Destination', destLabel(co.dest)]);
   if (co.kind === 'major' || (co.kind === 'minor' && (co.shares || {}).minorCerts) || co.kind === 'cube') info.push(['Shares', shareSummary(co).replace(/ = .*/, '')]);
   if (co.par) info.push(['Par', co.par]);
+  if (!chPart('info')) { info.length = 0; y = hh + pad * 0.3; }
   let ix = pad;
   info.forEach(([k, v]) => { const kw = measure(k + ': ', ifs, true, 'sans', ist.italic), vw = measure(v, ifs, ist.bold, ist.fam, ist.italic); if (ix + kw + vw > W - pad && ix > pad) { ix = pad; y += ifs * 1.6; } s += textEl(ix, y, k + ':', { fs: ifs, bold: true, italic: ist.italic, fam: 'sans', fill: ist.fill === ink ? mute : ist.fill }) + textEl(ix + kw, y, v, ist); ix += kw + vw + ifs * 2; });
   y += ifs * 1.2;
@@ -1425,7 +1430,8 @@ function charterSVG(co, W, H, opt = {}) {
   const label = (x, yy, t) => textEl(x, yy, t, lst);
   const footH = cs.orOn && co.kind !== 'cube' ? Math.max(fs * 4.2, ctStyle('steps', { fs: fs * 0.82 }).fs * 5.1) : 0;
   // tokens / cubes row
-  if (co.kind === 'cube') {
+  if (!chPart('tokens')) { /* tokens / cubes row switched off */ }
+  else if (co.kind === 'cube') {
     const n = Math.max(0, co.cubes || 0); y += fs * 1.6; s += label(pad, y, `TRACK (${n})`); y += fs * 0.8;
     const cz = Math.min(8, (W - 2 * pad) / Math.min(Math.max(n, 1), 14) * 0.85), per = Math.max(1, Math.floor((W - 2 * pad) / (cz * 1.15)));
     for (let i = 0; i < n; i++) { const cx = pad + (i % per) * cz * 1.15, cy = y + Math.floor(i / per) * cz * 1.1; s += `<g transform="translate(${n2(cx)} ${n2(cy)}) scale(${n2(cz / 100)})">${iconSVG('cube', c1)}</g>`; }
@@ -1446,20 +1452,29 @@ function charterSVG(co, W, H, opt = {}) {
   // special rules: as many lines as fit in up to 45% of the card, so bigger text gets more room
   const nts = ctStyle('notes', { fs: fs * 0.92, fam, fill: ink }), nlh = nts.fs * 1.22;
   const boxTop0 = y + fs * 0.6, noteRoom = Math.max(0, Math.min(H * 0.45, H - boxTop0 - pad - footH - fs * 6));
-  const noteLines = co.notes ? wrapText(co.notes, W - 2 * pad, nts.fs, nts.fam, nts.bold).slice(0, Math.max(1, Math.floor((noteRoom - nts.fs * 0.4) / nlh))) : [];
-  // boxes
+  const noteLines = co.notes && chPart('notes') ? wrapText(co.notes, W - 2 * pad, nts.fs, nts.fam, nts.bold).slice(0, Math.max(1, Math.floor((noteRoom - nts.fs * 0.4) / nlh))) : [];
+  // boxes row: treasury, trains (or income on cube cards) and the player aid — whichever are switched on share the width
   const boxTop = boxTop0, boxH = Math.max(fs * 6, H - boxTop - pad - footH - (noteLines.length ? noteLines.length * nlh + nts.fs * 0.5 : 0));
-  const tw = (W - 2 * pad) * (co.kind === 'cube' ? 0.5 : 0.36);
-  s += roundRect(pad, boxTop, tw, boxH, 2, `fill="none" stroke="${Color.light(c1, 0.25)}" stroke-width="0.4"`) + label(pad + 2, boxTop + fs * 1.3, 'TREASURY');
-  if (co.kind === 'cube') {
-    const x2 = pad + tw + pad * 0.6, w2 = W - pad - x2;
-    s += roundRect(x2, boxTop, w2, boxH, 2, `fill="none" stroke="${Color.light(c1, 0.25)}" stroke-width="0.4"`) + label(x2 + 2, boxTop + fs * 1.3, 'INCOME / DIVIDENDS');
-  } else {
-    const x2 = pad + tw + pad * 0.6, w2 = W - pad - x2, nT = Math.max(1, co.trains || 4);
-    s += label(x2, boxTop + fs * 1.3 - fs * 0.2, 'TRAINS');
-    const sg = 2, slotW = (w2 - sg * (nT - 1)) / nT, slotTop = boxTop + fs * 2.1, slotH = boxH - fs * 2.1;
-    for (let i = 0; i < nT; i++) s += roundRect(x2 + i * (slotW + sg), slotTop, slotW, slotH, 1.6, `fill="${Color.light(c1, 0.93)}" stroke="${Color.light(c1, 0.3)}" stroke-width="0.35" stroke-dasharray="1.2 0.8"`);
-  }
+  const aidOn = cs.aidOn && String(cs.aidText || '').trim();
+  const boxes = [];
+  if (chPart('treasury')) boxes.push(['treasury', 1]);
+  if (chPart('main')) boxes.push(['main', co.kind === 'cube' ? 1 : 1.8]);
+  if (aidOn) boxes.push(['aid', boxes.length ? 1.7 : 1]);
+  const bgap = pad * 0.6, sumW = boxes.reduce((a, b) => a + b[1], 0) || 1, avail = W - 2 * pad - bgap * Math.max(0, boxes.length - 1);
+  const boxStroke = `fill="none" stroke="${Color.light(c1, 0.25)}" stroke-width="0.4"`;
+  let bx = pad;
+  boxes.forEach(([kind, wt]) => {
+    const bw = (avail * wt) / sumW;
+    if (kind === 'treasury') s += roundRect(bx, boxTop, bw, boxH, 2, boxStroke) + label(bx + 2, boxTop + fs * 1.3, 'TREASURY');
+    else if (kind === 'main' && co.kind === 'cube') s += roundRect(bx, boxTop, bw, boxH, 2, boxStroke) + label(bx + 2, boxTop + fs * 1.3, 'INCOME / DIVIDENDS');
+    else if (kind === 'main') {
+      const nT = Math.max(1, co.trains || 4);
+      s += label(bx, boxTop + fs * 1.3 - fs * 0.2, 'TRAINS');
+      const sg = 2, slotW = (bw - sg * (nT - 1)) / nT, slotTop = boxTop + fs * 2.1, slotH = boxH - fs * 2.1;
+      for (let i = 0; i < nT; i++) s += roundRect(bx + i * (slotW + sg), slotTop, slotW, slotH, 1.6, `fill="${Color.light(c1, 0.93)}" stroke="${Color.light(c1, 0.3)}" stroke-width="0.35" stroke-dasharray="1.2 0.8"`);
+    } else if (kind === 'aid') s += playerAidSVG(cs, bx, boxTop, bw, boxH, fs, fam, ink, c1, label);
+    bx += bw + bgap;
+  });
   let ny = boxTop + boxH + nts.fs * 1.25;
   noteLines.forEach((l, i) => (s += textEl(pad, ny + i * nlh, l, nts)));
   ny += noteLines.length * nlh;
@@ -1476,6 +1491,36 @@ function charterSVG(co, W, H, opt = {}) {
       s += textEl(fx + ffs * 1.5, fy, t, sst); fx += ffs * 1.5 + w + ffs * 1.4;
     });
   }
+  return s;
+}
+
+// Player aid box: a title and the user's text, shrunk to fit. Lines starting with "- " become bullets.
+function playerAidSVG(cs, x, y, w, h, fs, fam, ink, c1, label) {
+  let s = roundRect(x, y, w, h, 2, `fill="${Color.light(c1, 0.95)}" stroke="${Color.light(c1, 0.25)}" stroke-width="0.4"`);
+  const title = String(cs.aidTitle ?? 'PLAYER AID').trim();
+  let top = y + fs * 0.6;
+  if (title) { s += label(x + 2, y + fs * 1.3, title.toUpperCase()); top = y + fs * 2.1; }
+  const base = ctStyle('aid', { fs: fs * 0.9, fam, fill: ink }), innerW = w - 4, room = y + h - top - fs * 0.4;
+  const sized = ((CS().charterText || {}).aid || {}).size;
+  // bullets ("- " or "* ") get a hanging indent; paragraphs wrap on their own
+  const lay = (afs) => {
+    const out = [], bw = measure('• ', afs, base.bold, base.fam);
+    String(cs.aidText || '').split('\n').forEach((para) => {
+      const m = para.match(/^\s*[-*•]\s+(.*)$/);
+      if (!m) { wrapText(para, innerW, afs, base.fam, base.bold).forEach((t) => out.push({ t, dx: 0 })); return; }
+      wrapText(m[1], innerW - bw, afs, base.fam, base.bold).forEach((t, i) => out.push(i ? { t, dx: bw } : { t: '•', dx: 0, rest: t, bw }));
+    });
+    return out;
+  };
+  // fill the box: grow up to 1.6× when there is room (unless a size was set under Charter text), shrink to fit when there isn't
+  let k = sized ? 1 : 1.6, lines = [], lh = 0;
+  for (; k >= 0.35; k *= 0.93) { lh = base.fs * k * 1.25; lines = lay(base.fs * k); if (lines.length * lh <= room) break; }
+  const afs = base.fs * Math.max(k, 0.35), st = { ...base, fs: afs };
+  lines.slice(0, Math.max(1, Math.floor(room / lh))).forEach((l, i) => {
+    const ly = top + afs + i * lh;
+    s += textEl(x + 2 + l.dx, ly, l.t, st);
+    if (l.rest !== undefined) s += textEl(x + 2 + l.bw, ly, l.rest, st);
+  });
   return s;
 }
 

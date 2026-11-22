@@ -34,9 +34,8 @@ function renderCompLeft() {
     ${F('Token disc', I.seg('tokenMM', cs.tokenMM, [[12, '12 mm'], [15, '15 mm'], [16, '16 mm'], [20, '20 mm']], 'num'))}
     ${F('Extra tokens', I.num('extraTokens', cs.extraTokens, 0, 20, 1))}
     ${I.check('homeOnMap', cs.homeOnMap !== false, 'Show home logos on the map')}
-    ${I.check('orOn', cs.orOn, 'Print turn order on charters')}
-    <div class="f full">${I.area('orSteps', cs.orSteps, 5)}</div>
     <div class="help">Extra tokens are added per company for the stock market and par markers. Stickers print 0.5 mm smaller than the disc so they sit cleanly.</div></div>
+    ${charterLayoutSec()}
     ${charterTextSec()}
     <div class="sec"><button class="btn pri" id="coExport" style="width:100%">Print / export components…</button></div>`;
   $('#compLeft').innerHTML = h;
@@ -54,6 +53,22 @@ function renderCompLeft() {
   const cta = $('#ctArea'); if (cta) cta.onchange = () => { S.ctArea = cta.value; renderCompLeft(); };
   const ctr = $('#ctReset'); if (ctr) ctr.onclick = () => { const ct = CS().charterText || {}; if (!ct[S.ctArea]) return; checkpoint(); delete ct[S.ctArea]; renderCompLeft(); renderCompPreview(); };
   tipComp();
+}
+// Charter layout: switch parts of the charter on or off, turn order, and a player aid box
+function charterLayoutSec() {
+  const cs = CS(), secs = cs.sections || {};
+  return `<div class="sec"><h3>Charter layout</h3>
+    <div ${bind('csec', () => { const c = CS(); return (c.sections = c.sections || {}); }, () => renderCompPreview())}>
+      ${CH_PARTS.map(([k, l]) => I.check(k, secs[k] !== false, l)).join('')}
+    </div>
+    <div ${bind('cslay', CS, () => { renderCompPreview(); })}>
+      ${I.check('orOn', cs.orOn, 'Turn order (18xx charters)')}
+      <div class="f full">${I.area('orSteps', cs.orSteps, 4, 'One step per line')}</div>
+      ${I.check('aidOn', !!cs.aidOn, 'Player aid box')}
+      ${F('Aid title', I.text('aidTitle', cs.aidTitle ?? 'PLAYER AID', 'e.g. ON YOUR TURN'))}
+      <div class="f full">${I.area('aidText', cs.aidText || '', 5, 'Anything players should see on the card. Start a line with - for a bullet.')}</div>
+    </div>
+    <div class="help">These apply to every charter. Boxes that stay on share the width; with all of them off, the player aid gets the whole space. Its text shrinks to fit — make it bigger or bolder under Charter text › Player aid.</div></div>`;
 }
 // Charter text: size, bold, italic, font and colour for each text area of the charters
 function charterTextSec() {
@@ -247,11 +262,11 @@ handlers.coDel = () => confirmBox('Delete company', `Delete ${esc(curCo().name)}
 
 const _rpBase = renderProps;
 renderProps = function () {
-  if (S.view2 === 'comp') { const keep = BT.cs, keepCt = BT.ct; BT = {}; if (keep) BT.cs = keep; if (keepCt) BT.ct = keepCt; try { propsEl.innerHTML = compPanel(); } catch (e) { console.error(e); propsEl.innerHTML = `<div class="sec">Panel error: ${esc(e.message)}</div>`; } wireProps(); tipProps(); tipComp(); return; }
+  if (S.view2 === 'comp') { const keepL = {}; for (const kk in BT) if (document.querySelector(`#compLeft [data-bind="${kk}"]`)) keepL[kk] = BT[kk]; BT = keepL; try { propsEl.innerHTML = compPanel(); } catch (e) { console.error(e); propsEl.innerHTML = `<div class="sec">Panel error: ${esc(e.message)}</div>`; } wireProps(); tipProps(); tipComp(); return; }
   _rpBase();
 };
 function tipComp() {
-  const T = { 'Text area': 'Which part of the charter to format: the name, the type line, the home/shares row, section headings, token costs, special rules or the turn order.',
+  const T = { 'Aid title': 'Heading of the player aid box. Leave empty for none.', 'Text area': 'Which part of the charter to format: the name, the type line, the home/shares row, section headings, token costs, special rules or the turn order.',
     'Text size': 'Size of this text area, from half to three times the normal size.', 'Font': 'Typeface for this text area. Default keeps the card’s own choice.', 'Text color': 'Color for this text area. Untick for the default.',
     'Abbreviation': 'Short name used on tokens and cards, e.g. PRR.', 'Type': '18xx majors get charters with station tokens; minors use their charter as the certificate; cube rails get a company card with track cubes; privates get a single card.',
     'Main color': 'Company color for tokens, card stripes and charter header.', 'Accent': 'Second color used by some logo styles (ring, band, split, stripe, star, diamond).', 'Text color': 'Force the logo text color instead of choosing black or white automatically.',
