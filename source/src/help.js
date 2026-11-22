@@ -136,6 +136,7 @@ const HELP = [
       <li><b>Minor</b> — a small company owned by one player. Its charter is its only certificate unless you tick <i>Also make share certificates</i>.</li>
       <li><b>Cube rails</b> — for Chicago Express, Irish Gauge and similar: a company card with track cubes, a treasury and income box, and plain share cards (1 of 5, 2 of 5…).</li>
       <li><b>Private</b> — one card with cost, revenue and special ability.</li>
+      <li><b>Charter text</b> (left panel): pick a text area — company name, type line, home/shares row, section headings, token costs, special rules or turn order — and set its size, bold, italic, font and color for every charter. Special rules get more room as their text grows.</li>
     </ul>
     <h4>Logos &amp; tokens</h4>
     <p>Logos are generated from the abbreviation in 8 styles (solid, ring, band, split, stripe, star, diamond, monogram) using the main and accent colors — or choose <i>Your image</i> to upload a picture, cropped to a circle. The same logo is used on tokens, cards, charters and the map. Token stickers print 0.5 mm smaller than the disc size you choose (12, 15, 16 or 20 mm), plus extra tokens per company for market markers.</p>

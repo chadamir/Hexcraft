@@ -1214,6 +1214,26 @@ function newCompany(i = (P.companies || []).length) {
 }
 const CS = () => P.compStyle || (P.compStyle = defaultCompStyle());
 const compFam = () => (CS().theme === 'classic' ? 'serif' : 'sans');
+// Text areas on a charter, each with its own formatting (Companies tab › Charter text).
+// cs.charterText[area] = { size (×), bold, italic, font: '' | 'company' | 'sans' | 'serif' | 'mono', color }
+const CT_AREAS = [
+  ['name', 'Company name', { bold: true }], ['kind', 'Type line', { bold: true, fam: 'sans' }],
+  ['info', 'Home / shares row', {}], ['labels', 'Section headings', { bold: true, fam: 'sans' }],
+  ['tokens', 'Token costs', { fam: 'sans' }], ['notes', 'Special rules', { italic: true }], ['steps', 'Turn order', { fam: 'sans' }],
+];
+function ctDefault(area) { const a = CT_AREAS.find((x) => x[0] === area); return (a && a[2]) || {}; }
+// effective style for an area: base { fs, bold, italic, fam, fill } adjusted by the user's settings
+function ctStyle(area, base) {
+  const st = (CS().charterText || {})[area] || {}, d = ctDefault(area);
+  const famOf = (f) => (f === 'company' || !f ? null : f);
+  return {
+    fs: base.fs * (st.size || 1),
+    bold: st.bold !== undefined ? st.bold : base.bold !== undefined ? base.bold : !!d.bold,
+    italic: st.italic !== undefined ? st.italic : base.italic !== undefined ? base.italic : !!d.italic,
+    fam: famOf(st.font) || (st.font === 'company' ? compFam() : base.fam || d.fam || compFam()),
+    fill: st.color || base.fill,
+  };
+}
 
 // ---------------- Logos (token art) ----------------
 let _lgSeq = 0;
@@ -1384,22 +1404,26 @@ function charterSVG(co, W, H, opt = {}) {
   const lr = hh * 0.38;
   s += `<g transform="translate(${n2(pad + lr)} ${n2(hh / 2)})">${logoSVG(co, lr, opt)}</g>`;
   const nx = pad + lr * 2 + pad * 0.6, nmax = W - nx - pad;
-  let nfs = hh * 0.38; nfs = Math.min(nfs, nfs * nmax / Math.max(1, measure(co.name, nfs, true, fam)));
-  s += textEl(nx, hh * 0.52, co.name, { fs: nfs, bold: true, fam, fill: tc });
+  const nst = ctStyle('name', { fs: hh * 0.38, fam, fill: tc });
+  let nfs = Math.min(nst.fs, hh * 0.62); nfs = Math.min(nfs, nfs * nmax / Math.max(1, measure(co.name, nfs, nst.bold, nst.fam, nst.italic)));
+  s += textEl(nx, hh * 0.52, co.name, { ...nst, fs: nfs });
   const kindTxt = (KIND_LABEL[co.kind] || '') + (co.abbr ? ' · ' + co.abbr : '') + (cs.game ? ' · ' + cs.game : '');
-  s += textEl(nx, hh * 0.8, kindTxt.toUpperCase(), { fs: Math.min(3.2, hh * 0.13), bold: true, fam: 'sans', fill: tc });
+  const kst = ctStyle('kind', { fs: Math.min(3.2, hh * 0.13), fam: 'sans', fill: tc });
+  s += textEl(nx, hh * 0.8 + (kst.fs - Math.min(3.2, hh * 0.13)) * 0.6, kindTxt.toUpperCase(), { ...kst, fs: Math.min(kst.fs, kst.fs * nmax / Math.max(1, measure(kindTxt.toUpperCase(), kst.fs, kst.bold, kst.fam))) });
   // info row
-  let y = hh + pad * 0.85; const fs = Math.min(3.4, H * 0.024);
+  const fs = Math.min(3.4, H * 0.024), ist = ctStyle('info', { fs, fam, fill: ink, bold: false }), ifs = ist.fs;
+  let y = hh + pad * 0.85 + (ifs - fs) * 0.8;
   const info = [];
   const homeTxt = homeLabel(co.home); if (homeTxt) info.push(['Home', homeTxt]);
   if (co.dest) info.push(['Destination', destLabel(co.dest)]);
   if (co.kind === 'major' || (co.kind === 'minor' && (co.shares || {}).minorCerts) || co.kind === 'cube') info.push(['Shares', shareSummary(co).replace(/ = .*/, '')]);
   if (co.par) info.push(['Par', co.par]);
   let ix = pad;
-  info.forEach(([k, v]) => { const kw = measure(k + ': ', fs, true, 'sans'), vw = measure(v, fs, false, fam); if (ix + kw + vw > W - pad && ix > pad) { ix = pad; y += fs * 1.6; } s += textEl(ix, y, k + ':', { fs, bold: true, fam: 'sans', fill: mute }) + textEl(ix + kw, y, v, { fs, fam, fill: ink }); ix += kw + vw + fs * 2; });
-  y += fs * 1.2;
-  const label = (x, yy, t) => textEl(x, yy, t, { fs: fs * 0.9, bold: true, fam: 'sans', fill: Color.dark(c1, 0.2) });
-  const footH = cs.orOn && co.kind !== 'cube' ? fs * 4.2 : 0;
+  info.forEach(([k, v]) => { const kw = measure(k + ': ', ifs, true, 'sans', ist.italic), vw = measure(v, ifs, ist.bold, ist.fam, ist.italic); if (ix + kw + vw > W - pad && ix > pad) { ix = pad; y += ifs * 1.6; } s += textEl(ix, y, k + ':', { fs: ifs, bold: true, italic: ist.italic, fam: 'sans', fill: ist.fill === ink ? mute : ist.fill }) + textEl(ix + kw, y, v, ist); ix += kw + vw + ifs * 2; });
+  y += ifs * 1.2;
+  const lst = ctStyle('labels', { fs: fs * 0.9, fam: 'sans', fill: Color.dark(c1, 0.2) });
+  const label = (x, yy, t) => textEl(x, yy, t, lst);
+  const footH = cs.orOn && co.kind !== 'cube' ? Math.max(fs * 4.2, ctStyle('steps', { fs: fs * 0.82 }).fs * 5.1) : 0;
   // tokens / cubes row
   if (co.kind === 'cube') {
     const n = Math.max(0, co.cubes || 0); y += fs * 1.6; s += label(pad, y, `TRACK (${n})`); y += fs * 0.8;
@@ -1414,12 +1438,17 @@ function charterSVG(co, W, H, opt = {}) {
       const cx = pad + tr + i * (2 * tr + gap), cy = y + tr + 1;
       s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(tr)}" fill="#ffffff" stroke="${c1}" stroke-width="0.35" stroke-dasharray="${i === 0 ? 'none' : '1 0.8'}"/>`;
       s += `<g transform="translate(${n2(cx)} ${n2(cy)})" opacity="${i === 0 ? 1 : 0.28}">${logoSVG(co, tr * 0.86, opt)}</g>`;
-      const lab = costs[i] || ''; if (lab) s += textEl(cx, cy + tr + fs * 1.15, lab, { fs: fs * 0.9, bold: i === 0, fam: 'sans', anchor: 'middle', fill: ink });
+      const tst = ctStyle('tokens', { fs: fs * 0.9, fam: 'sans', fill: ink, bold: i === 0 });
+      const lab = costs[i] || ''; if (lab) s += textEl(cx, cy + tr + tst.fs * 1.25, lab, { ...tst, anchor: 'middle' });
     }
-    y += tr * 2 + fs * 2.4;
+    y += tr * 2 + Math.max(fs * 2.4, ctStyle('tokens', { fs: fs * 0.9 }).fs * 2.6);
   }
+  // special rules: as many lines as fit in up to 45% of the card, so bigger text gets more room
+  const nts = ctStyle('notes', { fs: fs * 0.92, fam, fill: ink }), nlh = nts.fs * 1.22;
+  const boxTop0 = y + fs * 0.6, noteRoom = Math.max(0, Math.min(H * 0.45, H - boxTop0 - pad - footH - fs * 6));
+  const noteLines = co.notes ? wrapText(co.notes, W - 2 * pad, nts.fs, nts.fam, nts.bold).slice(0, Math.max(1, Math.floor((noteRoom - nts.fs * 0.4) / nlh))) : [];
   // boxes
-  const boxTop = y + fs * 0.6, boxH = Math.max(fs * 6, H - boxTop - pad - footH - (co.notes ? Math.min(H * 0.16, fs * 5) : 0));
+  const boxTop = boxTop0, boxH = Math.max(fs * 6, H - boxTop - pad - footH - (noteLines.length ? noteLines.length * nlh + nts.fs * 0.5 : 0));
   const tw = (W - 2 * pad) * (co.kind === 'cube' ? 0.5 : 0.36);
   s += roundRect(pad, boxTop, tw, boxH, 2, `fill="none" stroke="${Color.light(c1, 0.25)}" stroke-width="0.4"`) + label(pad + 2, boxTop + fs * 1.3, 'TREASURY');
   if (co.kind === 'cube') {
@@ -1431,22 +1460,20 @@ function charterSVG(co, W, H, opt = {}) {
     const sg = 2, slotW = (w2 - sg * (nT - 1)) / nT, slotTop = boxTop + fs * 2.1, slotH = boxH - fs * 2.1;
     for (let i = 0; i < nT; i++) s += roundRect(x2 + i * (slotW + sg), slotTop, slotW, slotH, 1.6, `fill="${Color.light(c1, 0.93)}" stroke="${Color.light(c1, 0.3)}" stroke-width="0.35" stroke-dasharray="1.2 0.8"`);
   }
-  let ny = boxTop + boxH + fs * 1.3;
-  if (co.notes) {
-    const lines = wrapText(co.notes, W - 2 * pad, fs * 0.92, fam, false).slice(0, 4);
-    lines.forEach((l, i) => (s += textEl(pad, ny + i * fs * 1.2, l, { fs: fs * 0.92, fam, fill: ink, italic: true })));
-    ny += lines.length * fs * 1.2;
-  }
+  let ny = boxTop + boxH + nts.fs * 1.25;
+  noteLines.forEach((l, i) => (s += textEl(pad, ny + i * nlh, l, nts)));
+  ny += noteLines.length * nlh;
   if (co.kind === 'minor' && !(co.shares || {}).minorCerts) s += textEl(W - pad, hh + pad * 0.85, 'This charter is the company’s certificate', { fs: fs * 0.85, fam: 'sans', anchor: 'end', fill: mute, italic: true });
   if (footH) {
     const steps = String(cs.orSteps || '').split('\n').map((x) => x.trim()).filter(Boolean);
-    const fy = H - pad * 0.55 - fs * 0.4; let fx = pad; const ffs = fs * 0.82;
-    s += `<line x1="${n2(pad)}" y1="${n2(fy - fs * 1.6)}" x2="${n2(W - pad)}" y2="${n2(fy - fs * 1.6)}" stroke="${Color.light(c1, 0.4)}" stroke-width="0.3"/>`;
+    const sst = ctStyle('steps', { fs: fs * 0.82, fam: 'sans', fill: ink });
+    const fy = H - pad * 0.55 - fs * 0.4; let fx = pad; const ffs = sst.fs;
+    s += `<line x1="${n2(pad)}" y1="${n2(fy - Math.max(fs * 1.6, ffs * 1.95))}" x2="${n2(W - pad)}" y2="${n2(fy - Math.max(fs * 1.6, ffs * 1.95))}" stroke="${Color.light(c1, 0.4)}" stroke-width="0.3"/>`;
     steps.forEach((st, i) => {
-      const t = st, w = measure(t, ffs, false, 'sans');
+      const t = st, w = measure(t, ffs, sst.bold, sst.fam, sst.italic);
       if (fx + ffs * 1.6 + w > W - pad) return;
       s += `<circle cx="${n2(fx + ffs * 0.6)}" cy="${n2(fy - ffs * 0.35)}" r="${n2(ffs * 0.62)}" fill="${c1}"/>` + textEl(fx + ffs * 0.6, fy - ffs * 0.35 + ffs * 0.33, String(i + 1), { fs: ffs * 0.8, bold: true, fam: 'sans', anchor: 'middle', fill: tc });
-      s += textEl(fx + ffs * 1.5, fy, t, { fs: ffs, fam: 'sans', fill: ink }); fx += ffs * 1.5 + w + ffs * 1.4;
+      s += textEl(fx + ffs * 1.5, fy, t, sst); fx += ffs * 1.5 + w + ffs * 1.4;
     });
   }
   return s;

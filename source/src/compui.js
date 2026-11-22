@@ -37,6 +37,7 @@ function renderCompLeft() {
     ${I.check('orOn', cs.orOn, 'Print turn order on charters')}
     <div class="f full">${I.area('orSteps', cs.orSteps, 5)}</div>
     <div class="help">Extra tokens are added per company for the stock market and par markers. Stickers print 0.5 mm smaller than the disc so they sit cleanly.</div></div>
+    ${charterTextSec()}
     <div class="sec"><button class="btn pri" id="coExport" style="width:100%">Print / export components…</button></div>`;
   $('#compLeft').innerHTML = h;
   $$('#compLeft .coitem').forEach((el) => (el.onclick = (e) => { if (e.target.closest('[data-dup]')) { duplicateCompany(e.target.closest('[data-dup]').dataset.dup); return; } S.compSel = el.dataset.id; renderCompAll(); }));
@@ -50,7 +51,25 @@ function renderCompLeft() {
     if (sel.dataset.cspreset === 'share') { cs.shareW = w; cs.shareH = hh; } else { cs.charterW = w; cs.charterH = hh; }
     renderCompLeft(); renderCompPreview();
   }));
+  const cta = $('#ctArea'); if (cta) cta.onchange = () => { S.ctArea = cta.value; renderCompLeft(); };
+  const ctr = $('#ctReset'); if (ctr) ctr.onclick = () => { const ct = CS().charterText || {}; if (!ct[S.ctArea]) return; checkpoint(); delete ct[S.ctArea]; renderCompLeft(); renderCompPreview(); };
   tipComp();
+}
+// Charter text: size, bold, italic, font and colour for each text area of the charters
+function charterTextSec() {
+  const cs = CS(), area = S.ctArea || (S.ctArea = 'notes'), d = ctDefault(area);
+  const st = (cs.charterText || {})[area] || {};
+  const tgt = () => { const c = CS(); c.charterText = c.charterText || {}; return (c.charterText[area] = c.charterText[area] || {}); };
+  return `<div class="sec"><h3>Charter text</h3>
+    ${F('Text area', `<select id="ctArea">${CT_AREAS.map(([v, l]) => `<option value="${v}" ${v === area ? 'selected' : ''}>${l}${(cs.charterText || {})[v] && Object.keys(cs.charterText[v]).length ? ' •' : ''}</option>`).join('')}</select>`)}
+    <div ${bind('ct', tgt, () => { renderCompPreview(); const r = $('#ctReset'); if (r) r.disabled = false; })}>
+      ${F('Text size', I.range('size', st.size || 1, 0.5, 3, 0.05))}
+      ${I.check('bold', st.bold !== undefined ? st.bold : !!d.bold, 'Bold')}${I.check('italic', st.italic !== undefined ? st.italic : !!d.italic, 'Italic')}
+      ${F('Font', I.select('font', st.font || '', [['', 'Default'], ['company', 'Card font (serif for Classic)'], ['sans', 'Sans serif'], ['serif', 'Serif'], ['mono', 'Typewriter']]))}
+      ${F('Text color', I.optColor('color', st.color, '#1d1a16', 'Custom'))}
+    </div>
+    <div class="help">Applies to this part of every charter. The company name still shrinks to fit; special rules get more room as the text grows (up to about half the card).</div>
+    <button class="btn sm" id="ctReset" ${Object.keys(st).length ? '' : 'disabled'}>Reset ${esc((CT_AREAS.find((x) => x[0] === area) || [])[1] || '')} to default</button></div>`;
 }
 // reuse props binding logic for the left panel
 $('#compLeft').addEventListener('input', (e) => {
@@ -228,11 +247,13 @@ handlers.coDel = () => confirmBox('Delete company', `Delete ${esc(curCo().name)}
 
 const _rpBase = renderProps;
 renderProps = function () {
-  if (S.view2 === 'comp') { const keep = BT.cs; BT = {}; if (keep) BT.cs = keep; try { propsEl.innerHTML = compPanel(); } catch (e) { console.error(e); propsEl.innerHTML = `<div class="sec">Panel error: ${esc(e.message)}</div>`; } wireProps(); tipProps(); tipComp(); return; }
+  if (S.view2 === 'comp') { const keep = BT.cs, keepCt = BT.ct; BT = {}; if (keep) BT.cs = keep; if (keepCt) BT.ct = keepCt; try { propsEl.innerHTML = compPanel(); } catch (e) { console.error(e); propsEl.innerHTML = `<div class="sec">Panel error: ${esc(e.message)}</div>`; } wireProps(); tipProps(); tipComp(); return; }
   _rpBase();
 };
 function tipComp() {
-  const T = { 'Abbreviation': 'Short name used on tokens and cards, e.g. PRR.', 'Type': '18xx majors get charters with station tokens; minors use their charter as the certificate; cube rails get a company card with track cubes; privates get a single card.',
+  const T = { 'Text area': 'Which part of the charter to format: the name, the type line, the home/shares row, section headings, token costs, special rules or the turn order.',
+    'Text size': 'Size of this text area, from half to three times the normal size.', 'Font': 'Typeface for this text area. Default keeps the card’s own choice.', 'Text color': 'Color for this text area. Untick for the default.',
+    'Abbreviation': 'Short name used on tokens and cards, e.g. PRR.', 'Type': '18xx majors get charters with station tokens; minors use their charter as the certificate; cube rails get a company card with track cubes; privates get a single card.',
     'Main color': 'Company color for tokens, card stripes and charter header.', 'Accent': 'Second color used by some logo styles (ring, band, split, stripe, star, diamond).', 'Text color': 'Force the logo text color instead of choosing black or white automatically.',
     'Logo': 'Generate a token logo from the abbreviation, or use your own picture (cropped to a circle).', 'Logo text': 'Text on the token. Defaults to the abbreviation.',
     "President's %": "Size of the president's certificate. Some games use 30% or 40%.", 'Share %': 'Size of each regular certificate.', 'Total %': 'Total of all certificates, normally 100%.',
